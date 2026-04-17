@@ -14,6 +14,26 @@ Schnelles FastMCP-Template mit ausgelagerten Tool-Modulen.
 uv run python main.py
 ```
 
+### Tests
+
+Tests liegen in `tests/` und werden mit [pytest](https://pytest.org) ausgeführt.
+
+```bash
+uv run --group dev pytest tests/
+```
+
+Einzelnen Test ausführen:
+
+```bash
+uv run --group dev pytest tests/test_time.py
+```
+
+Mit ausführlicher Ausgabe:
+
+```bash
+uv run --group dev pytest tests/ -v
+```
+
 ### Neue Tools hinzufügen
 
 Lege eine neue Datei an, z. B. `generic/foo.py`:
