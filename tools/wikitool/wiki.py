@@ -103,7 +103,7 @@ def register_tools(mcp: FastMCP) -> None:
     )
     mcp.add_tool(
         get_artikel,
-        name="wiki_get_artikel",
+        name="wiki_get_article",
         description=(
             "Fetch the full text of a Feuerwehr-Lernbar article by ID. "
             "Articles cover fire department operations, rescue procedures, equipment, and hazardous materials. "
@@ -112,7 +112,7 @@ def register_tools(mcp: FastMCP) -> None:
     )
     mcp.add_tool(
         list_wiki_alphabetisch,
-        name="wiki_list_alphabetisch",
+        name="wiki_list_alphabetical",
         description=(
             "Browse the Feuerwehr-Lernbar fire department knowledge base alphabetically. "
             "Lists all articles starting with a given letter, paginated."

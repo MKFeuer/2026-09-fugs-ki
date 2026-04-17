@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 .env
 agent/config.json
+
+.codex/
