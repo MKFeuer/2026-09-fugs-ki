@@ -1,6 +1,7 @@
 import logging
-import os
-from typing import Any, Optional
+from typing import Any
+
+from config import Settings
 
 import httpx
 
@@ -9,14 +10,26 @@ log = logging.getLogger("commandx")
 class CIMgateClient:
     """HTTP-Client für die CIMgate.Connect REST API (statischer Bearer-Token)."""
 
-    def __init__(self) -> None:
-        host = os.environ.get("COMMANDX_HOST", "localhost:7000")
-        self._base_url = f"https://{host}/api/v1"
-        self._sec_header_name = os.environ.get("COMMANDX_SECURITY_HEADER_NAME", "X-Security-Token")
-        self._sec_header_value = os.environ.get("COMMANDX_SECURITY_HEADER_VALUE", "")
-        self._bearer_token = os.environ.get("COMMANDX_BEARER_TOKEN", "")
-        self._verify_ssl = os.environ.get("COMMANDX_VERIFY_SSL", "true").lower() != "false"
-        self._user_agent = os.environ.get("COMMANDX_USER_AGENT", "insomnia/12.5.0")
+    settings: Settings
+    _base_url: str
+    _sec_header_name: str
+    _sec_header_value: str
+    _bearer_token: str
+    _verify_ssl: bool
+    _user_agent: str
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        if settings is None:
+            self.settings = Settings()  # pyright: ignore[reportCallIssue]
+        else:
+            self.settings = settings
+            
+        self._base_url = f"https://{self.settings.commandx_host}/api/v1"
+        self._sec_header_name = self.settings.commandx_security_header_name
+        self._sec_header_value = self.settings.commandx_security_header_value
+        self._bearer_token = self.settings.commandx_bearer_token
+        self._verify_ssl = self.settings.commandx_verify_ssl
+        self._user_agent = self.settings.commandx_user_agent
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -26,7 +39,7 @@ class CIMgateClient:
             "User-Agent": self._user_agent,
         }
 
-    def get(self, path: str, params: Optional[dict] = None) -> Any:
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         url = f"{self._base_url}/rest-api/{path.lstrip('/')}"
         headers = self._headers()
         log.info("GET   %s  params=%s", url, params)
