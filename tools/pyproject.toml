@@ -14,8 +14,3 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
-
-[tool.uv.workspace]
-members = [
-    "dwdtools",
-]

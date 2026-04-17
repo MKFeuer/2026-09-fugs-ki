@@ -70,10 +70,11 @@ def _get_current_and_next_12h_for_fixed_station() -> Dict[str, Any]:
 
 
 def register_tools(mcp: FastMCP) -> None:
-    @mcp.tool("dwd_fixed_03379_current_and_next_12h")
-    def dwd_fixed_03379_current_and_next_12h():
-        """
-        Liefert für Station 03379 die aktuelle Temperatur und die Vorhersage
-        für die nächsten 12 Stunden (in °C).
-        """
-        return _get_current_and_next_12h_for_fixed_station()
+    mcp.add_tool(
+        _get_current_and_next_12h_for_fixed_station,
+        name="get_current_and_next_12h_munich",
+        description=(
+            "This tool fetches the current temperature and the forecast for the next 12 hours for a fixed station in Munich from the DWD API. "
+            "The output includes the station ID, the current temperature with timestamp, and a list of the next 12 hours' temperatures with their timestamps."
+        ),
+    )
