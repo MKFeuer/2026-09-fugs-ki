@@ -1,12 +1,12 @@
 services:
   tools:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-tools:0.0.2-beta
+    image: ghcr.io/feuerwehrhackathon2024/mcp-tools:0.0.3-beta
     ports:
       - "3002:8000"
     restart: unless-stopped
 
   commandx:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:0.0.2-beta
+    image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:0.0.3-beta
     ports:
       - "3003:8000"
     restart: unless-stopped
@@ -17,9 +17,4 @@ services:
       - "3001:3001"
     volumes:
       - ./agent/config.json:/app/config.json:ro
-    depends_on:
-      tools:
-        condition: service_healthy
-      commandx:
-        condition: service_healthy
     restart: unless-stopped
