@@ -9,6 +9,8 @@ services:
     image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:0.0.3-beta
     ports:
       - "3003:8000"
+    env_file:
+      - ./commandx/.env
     restart: unless-stopped
 
   agent:
@@ -17,12 +19,4 @@ services:
       - "3001:3001"
     volumes:
       - ./agent/config.json:/app/config.json:ro
-    restart: unless-stopped
-
-  commandx:
-    build: ./commandx
-    ports:
-      - "8000:8000"
-    env_file:
-      - ./commandx/.env
     restart: unless-stopped
