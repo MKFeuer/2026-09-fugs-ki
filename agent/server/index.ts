@@ -14,8 +14,6 @@ const PORT = 3001;
 const systemPromptPath = join(import.meta.dir, "..", "system-prompt.md");
 const BASE_PROMPT = await Bun.file(systemPromptPath).text();
 
-const TOOLS_PROMPT = `\nYou have access to tools. When calling tools, use the exact parameter names as defined in the tool schemas. Prefer using tools when they can provide accurate, up-to-date information.`;
-
 // --- Models ---
 
 type ModelEntry = { label?: string; baseUrl: string; model: string; apiKey?: string };
@@ -155,8 +153,7 @@ const server = Bun.serve({
         const { messages } = (await req.json()) as { messages: UIMessage[] };
         const modelMessages = await convertToModelMessages(messages);
 
-        const hasTools = Object.keys(allTools).length > 0;
-        const system = `${BASE_PROMPT}${hasTools ? `\n${TOOLS_PROMPT}` : ""}\n\n[Current time: ${new Date().toISOString()}]`;
+        const system = `${BASE_PROMPT}\n\n[Aktuelle Zeit: ${new Date().toISOString()}]`;
 
         const activeModel = models[activeModelIndex];
         console.log(`Chat request → ${activeModel.label}`);
