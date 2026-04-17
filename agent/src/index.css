@@ -11,13 +11,13 @@
   --color-surface: oklch(0.985 0.004 85);
   --color-surface-alt: oklch(0.955 0.007 78);
   --color-surface-raised: oklch(0.935 0.009 78);
-  --color-border: oklch(0.895 0.010 78);
+  --color-border: oklch(0.895 0.01 78);
   --color-text: oklch(0.185 0.022 52);
-  --color-text-muted: oklch(0.50 0.014 55);
-  --color-accent: oklch(0.50 0.145 45);
-  --color-accent-dim: oklch(0.42 0.10 45);
+  --color-text-muted: oklch(0.5 0.014 55);
+  --color-accent: oklch(0.5 0.145 45);
+  --color-accent-dim: oklch(0.42 0.1 45);
   --color-accent-soft: oklch(0.95 0.025 45);
-  --color-user-bubble: oklch(0.30 0.038 52);
+  --color-user-bubble: oklch(0.3 0.038 52);
   --color-user-text: oklch(0.97 0.004 85);
   --color-tool-bg: oklch(0.95 0.018 155);
   --color-tool-text: oklch(0.38 0.08 155);
@@ -37,24 +37,37 @@ body {
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
 
 /* Textarea cap */
-textarea { max-height: 120px; }
+textarea {
+  max-height: 120px;
+}
 
 /* Input shell */
 .input-shell {
-  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
   border: 1px solid var(--color-border);
   box-shadow: 0 2px 16px -4px oklch(0.3 0.02 52 / 0.08);
 }
 
 .input-shell:focus-within {
-  border-color: oklch(0.50 0.145 45 / 0.4);
+  border-color: oklch(0.5 0.145 45 / 0.4);
   box-shadow:
-    0 0 0 3px oklch(0.50 0.145 45 / 0.06),
+    0 0 0 3px oklch(0.5 0.145 45 / 0.06),
     0 2px 16px -4px oklch(0.3 0.02 52 / 0.1);
 }
