@@ -1,0 +1,8 @@
+services:
+  agent:
+    build: ./agent
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./agent/config.json:/app/config.json:ro
+    restart: unless-stopped
