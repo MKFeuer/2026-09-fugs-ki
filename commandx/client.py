@@ -6,29 +6,28 @@ import httpx
 
 log = logging.getLogger("commandx")
 
-HOST = os.environ.get("COMMANDX_HOST", "localhost:7000")
-SEC_HEADER_NAME = os.environ.get("COMMANDX_SECURITY_HEADER_NAME", "X-Security-Token")
-SEC_HEADER_VALUE = os.environ.get("COMMANDX_SECURITY_HEADER_VALUE", "")
-BEARER_TOKEN = os.environ.get("COMMANDX_BEARER_TOKEN", "")
-VERIFY_SSL = os.environ.get("COMMANDX_VERIFY_SSL", "true").lower() != "false"
-USER_AGENT = os.environ.get("COMMANDX_USER_AGENT", "insomnia/12.5.0")
-
-BASE_URL = f"https://{HOST}/api/v1"
-
-
 class CIMgateClient:
     """HTTP-Client für die CIMgate.Connect REST API (statischer Bearer-Token)."""
 
+    def __init__(self) -> None:
+        host = os.environ.get("COMMANDX_HOST", "localhost:7000")
+        self._base_url = f"https://{host}/api/v1"
+        self._sec_header_name = os.environ.get("COMMANDX_SECURITY_HEADER_NAME", "X-Security-Token")
+        self._sec_header_value = os.environ.get("COMMANDX_SECURITY_HEADER_VALUE", "")
+        self._bearer_token = os.environ.get("COMMANDX_BEARER_TOKEN", "")
+        self._verify_ssl = os.environ.get("COMMANDX_VERIFY_SSL", "true").lower() != "false"
+        self._user_agent = os.environ.get("COMMANDX_USER_AGENT", "insomnia/12.5.0")
+
     def _headers(self) -> dict[str, str]:
         return {
-            SEC_HEADER_NAME: SEC_HEADER_VALUE,
-            "Authorization": f"Bearer {BEARER_TOKEN}",
+            self._sec_header_name: self._sec_header_value,
+            "Authorization": f"Bearer {self._bearer_token}",
             "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
         }
 
     def get(self, path: str, params: Optional[dict] = None) -> Any:
-        url = f"{BASE_URL}/rest-api/{path.lstrip('/')}"
+        url = f"{self._base_url}/rest-api/{path.lstrip('/')}"
         headers = self._headers()
         log.info("GET   %s  params=%s", url, params)
         log.info("GET   Headers: %s", headers)
@@ -36,7 +35,7 @@ class CIMgateClient:
             url,
             headers=headers,
             params=params,
-            verify=VERIFY_SSL,
+            verify=self._verify_ssl,
             timeout=30,
         )
         log.info("      → %s", resp.status_code)
