@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "**"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-tools:
+    name: Test mcp-tools
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run tests
+        run: uv run --group dev pytest tests/
+
+  test-commandx:
+    name: Test mcp-commandx
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: commandx/
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run tests
+        run: uv run --group dev pytest tests/
+
+  build-check-tools:
+    name: Build Check mcp-tools
+    runs-on: ubuntu-latest
+    needs: [test-tools]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build mcp-tools
+        uses: docker/build-push-action@v7
+        with:
+          context: tools/
+          push: false
+          tags: mcp-tools:ci
+
+  build-check-commandx:
+    name: Build Check mcp-commandx
+    runs-on: ubuntu-latest
+    needs: [test-commandx]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build mcp-commandx
+        uses: docker/build-push-action@v7
+        with:
+          context: commandx/
+          push: false
+          tags: mcp-commandx:ci

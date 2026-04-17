@@ -1,0 +1,27 @@
+{
+  "models": [
+    {
+      "label": "Local LLM",
+      "baseUrl": "http://localhost:8080/v1",
+      "model": "your-model-id"
+    },
+    {
+      "label": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-opus-4.5",
+      "apiKey": "sk-or-v1-your-key-here"
+    }
+  ],
+  "mcpServers": [
+    {
+      "label": "tools",
+      "url": "http://tools:8000/mcp",
+      "transport": "http"
+    },
+    {
+      "label": "commandx",
+      "url": "http://commandx:8000/mcp",
+      "transport": "http"
+    }
+  ]
+}

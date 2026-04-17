@@ -1,0 +1,73 @@
+@import "@fontsource-variable/google-sans-flex/wght.css";
+@import "tailwindcss";
+@import "./styles/prose-chat.css";
+@import "./styles/animations.css";
+
+@theme {
+  --font-main: "Google Sans Flex Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --color-surface: oklch(0.985 0.004 85);
+  --color-surface-alt: oklch(0.955 0.007 78);
+  --color-surface-raised: oklch(0.935 0.009 78);
+  --color-border: oklch(0.895 0.01 78);
+  --color-text: oklch(0.185 0.022 52);
+  --color-text-muted: oklch(0.5 0.014 55);
+  --color-accent: oklch(0.5 0.145 45);
+  --color-accent-dim: oklch(0.42 0.1 45);
+  --color-accent-soft: oklch(0.95 0.025 45);
+  --color-user-bubble: oklch(0.3 0.038 52);
+  --color-user-text: oklch(0.97 0.004 85);
+  --color-tool-bg: oklch(0.95 0.018 155);
+  --color-tool-text: oklch(0.38 0.08 155);
+  --color-code-bg: oklch(0.955 0.005 78);
+  --color-error-bg: oklch(0.965 0.022 22);
+  --color-error-text: oklch(0.45 0.13 22);
+  --color-error-border: oklch(0.88 0.04 22);
+}
+
+body {
+  font-family: var(--font-main);
+  color: var(--color-text);
+  background: var(--color-surface);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Textarea cap */
+textarea {
+  max-height: 120px;
+}
+
+/* Input shell */
+.input-shell {
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 16px -4px oklch(0.3 0.02 52 / 0.08);
+}
+
+.input-shell:focus-within {
+  border-color: oklch(0.5 0.145 45 / 0.4);
+  box-shadow:
+    0 0 0 3px oklch(0.5 0.145 45 / 0.06),
+    0 2px 16px -4px oklch(0.3 0.02 52 / 0.1);
+}
