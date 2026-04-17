@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "**"
+
+jobs:
+  build-check-tools:
+    name: Build Check mcp-tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build mcp-tools
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/
+          push: false
+          tags: mcp-tools:ci
+
+  build-check-commandx:
+    name: Build Check mcp-commandx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build mcp-commandx
+        uses: docker/build-push-action@v6
+        with:
+          context: commandx/
+          push: false
+          tags: mcp-commandx:ci
