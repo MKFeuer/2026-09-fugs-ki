@@ -40,7 +40,6 @@ client = CIMgateClient()
 
 mcp = FastMCP("CommandX – CIMgate.Connect", json_response=True, host="0.0.0.0", port=8000)
 
-
 @mcp.tool()
 def get_missions(
     is_deleted: bool = False,
@@ -169,9 +168,6 @@ def get_departments() -> list[dict]:
     """Gibt alle Abteilungen/Organisationen zurück."""
     log.info("TOOL  get_departments")
     return client.get("Department")
-
-
-register_generic_tools(mcp)
 
 
 if __name__ == "__main__":
