@@ -10,7 +10,7 @@ def distance_wgs84_geodesic(p1: tuple[float, float], p2: tuple[float, float]) ->
     g = Geodesic.WGS84.Inverse(lat1, lon1, lat2, lon2)
     return g["s12"]  # Distanz in Metern
 
-def location_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
+def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
     """Check if a point is inside a polygon, or not.
     point: (latitude, longitude)
     polygon: list of (latitude, longitude) tuples defining the vertices of the polygon
@@ -27,7 +27,7 @@ def register_tools(mcp: FastMCP) -> None:
         description="Returns the geodesic distance between two points on the Earth's surface in meters.",
     )
     mcp.add_tool(
-        location_in_polygon,
-        name="check_point_in_polygon",
+        point_in_polygon,
+        name="point_in_polygon",
         description="Checks if a point is inside a polygon. Returns True if the point is inside the polygon, False otherwise.",
     )
