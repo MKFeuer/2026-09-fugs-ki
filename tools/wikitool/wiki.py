@@ -4,7 +4,12 @@ from html.parser import HTMLParser
 from mcp.server.fastmcp import FastMCP
 
 BASE_URL = "https://www.feuerwehr-lernbar.bayern"
-API = f"{BASE_URL}/wp-json/wp/v2"
+API = f"{BASE_URL}/api"
+
+_HEADERS = {
+    "Accept": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+}
 
 
 class _StripHTML(HTMLParser):
@@ -27,22 +32,23 @@ async def search_wiki(suchbegriff: str, max_ergebnisse: int = 10) -> list[dict]:
     The ID can be used with get_artikel().
     """
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{API}/search", params={
-            "search": suchbegriff,
-            "per_page": max_ergebnisse,
-            "type": "post",
-            "_fields": "id,title,url,subtype",
-        })
+        r = await client.get(
+            f"{API}/search/suggest",
+            params={"search": suchbegriff},
+            headers=_HEADERS,
+        )
         r.raise_for_status()
-    return [
-        {
-            "id": item["id"],
-            "titel": item["title"],
-            "url": item["url"],
-            "typ": item.get("subtype", "post"),
-        }
-        for item in r.json()
+        data = r.json()
+
+    artikel = [
+        {"id": a["id"], "titel": a["title"], "url": f"{BASE_URL}/post/{a['id']}", "typ": "article"}
+        for a in data.get("articles", [])[:max_ergebnisse]
     ]
+    topics = [
+        {"id": t["id"], "titel": t["title"], "url": f"{BASE_URL}/topics/{t.get('identifier', t['id'])}", "typ": "topic"}
+        for t in data.get("topics", [])
+    ]
+    return (artikel + topics)[:max_ergebnisse]
 
 
 async def get_artikel(artikel_id: int) -> dict:
@@ -51,22 +57,26 @@ async def get_artikel(artikel_id: int) -> dict:
     The ID comes from the results of search_wiki().
     """
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{API}/posts/{artikel_id}", params={
-            "_fields": "id,title,content,excerpt,link,date_modified",
-        })
+        r = await client.get(
+            f"{API}/articles/{artikel_id}",
+            headers=_HEADERS,
+        )
         r.raise_for_status()
         data = r.json()
 
     parser = _StripHTML()
-    parser.feed(data["content"]["rendered"])
+    for block in data.get("media", []):
+        if block.get("type") == "wysiwyg" and block.get("wysiwyg"):
+            parser.feed(block["wysiwyg"])
 
     return {
         "id": data["id"],
-        "titel": data["title"]["rendered"],
+        "titel": data.get("title", ""),
         "inhalt": parser.get_text(),
-        "zusammenfassung": data["excerpt"]["rendered"].replace("<p>", "").replace("</p>", "").strip(),
-        "url": data["link"],
-        "zuletzt_geändert": data["date_modified"],
+        "zusammenfassung": data.get("preview_text") or "",
+        "keywords": data.get("keywords") or "",
+        "url": f"{BASE_URL}/post/{data['id']}",
+        "zuletzt_geändert": data.get("updated_at") or "",
     }
 
 
@@ -76,19 +86,22 @@ async def list_wiki_alphabetisch(buchstabe: str, seite: int = 1) -> list[dict]:
     Returns ID, title and URL for each entry.
     """
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{API}/posts", params={
-            "search": buchstabe,
-            "per_page": 20,
-            "page": seite,
-            "orderby": "title",
-            "order": "asc",
-            "_fields": "id,title,link",
-        })
+        r = await client.get(
+            f"{API}/search/suggest",
+            params={"search": buchstabe},
+            headers=_HEADERS,
+        )
         r.raise_for_status()
-    return [
-        {"id": p["id"], "titel": p["title"]["rendered"], "url": p["link"]}
-        for p in r.json()
+        data = r.json()
+
+    alle = [
+        {"id": a["id"], "titel": a["title"], "url": f"{BASE_URL}/post/{a['id']}"}
+        for a in data.get("articles", [])
+        if a["title"].upper().startswith(buchstabe.upper())
     ]
+    per_page = 20
+    start = (seite - 1) * per_page
+    return alle[start:start + per_page]
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -118,3 +131,16 @@ def register_tools(mcp: FastMCP) -> None:
             "Lists all articles starting with a given letter, paginated."
         ),
     )
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        ergebnisse = await search_wiki("Atemschutz")
+        print(ergebnisse)
+        if ergebnisse:
+            artikel = await get_artikel(ergebnisse[0]["id"])
+            print(artikel)
+
+    asyncio.run(main())
