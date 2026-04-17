@@ -1,40 +1,36 @@
 services:
   tools:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-tools:0.0.4-beta
+    image: ghcr.io/feuerwehrhackathon2024/mcp-tools:latest
     container_name: tools
     ports:
       - "3002:8000"
-    networks:
-      - internal
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   commandx:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:0.0.4-beta
+    image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:latest
     container_name: commandx
     ports:
       - "3003:8000"
-    networks:
-      - internal
     env_file:
       - ./commandx/.env
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   agent:
     build: ./agent
-    container_name: agent
     ports:
       - "3001:3001"
-    networks:
-      - internal
     volumes:
       - ./agent/config.json:/app/config.json:ro
-    depends_on:
-      tools:
-        condition: service_healthy
-      commandx:
-        condition: service_healthy
     restart: unless-stopped
-
-networks:
-  internal:
-    driver: bridge
