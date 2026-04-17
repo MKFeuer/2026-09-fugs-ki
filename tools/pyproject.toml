@@ -8,3 +8,8 @@ dependencies = [
     "geographiclib>=2.1",
     "mcp[cli]>=1.27.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "dwdtools",
+]
