@@ -1,0 +1,93 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+:root {
+  --color-surface: oklch(0.975 0.006 75);
+  --color-surface-alt: oklch(0.96 0.008 70);
+  --color-border: oklch(0.905 0.012 70);
+  --color-text: oklch(0.22 0.02 55);
+  --color-text-muted: oklch(0.52 0.02 55);
+  --color-accent: oklch(0.55 0.13 55);
+  --color-accent-soft: oklch(0.94 0.03 55);
+  --color-user-bubble: oklch(0.32 0.04 55);
+  --color-user-text: oklch(0.97 0.005 75);
+  --color-tool: oklch(0.93 0.025 90);
+  --color-tool-text: oklch(0.4 0.06 90);
+  --color-code-bg: oklch(0.945 0.008 70);
+}
+
+body {
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--color-text);
+  background: var(--color-surface);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Textarea auto-height handled via JS, cap overflow */
+textarea {
+  max-height: 120px;
+}
+
+/* Prose overrides for chat messages */
+.prose {
+  --tw-prose-body: var(--color-text);
+  --tw-prose-headings: var(--color-text);
+  --tw-prose-links: var(--color-accent);
+  --tw-prose-bold: var(--color-text);
+  --tw-prose-code: var(--color-text);
+  --tw-prose-pre-bg: var(--color-code-bg);
+  --tw-prose-pre-code: var(--color-text);
+  --tw-prose-quotes: var(--color-text-muted);
+  --tw-prose-quote-borders: var(--color-accent);
+  --tw-prose-counters: var(--color-text-muted);
+  --tw-prose-bullets: var(--color-text-muted);
+  --tw-prose-hr: var(--color-border);
+  --tw-prose-th-borders: var(--color-border);
+  --tw-prose-td-borders: var(--color-border);
+}
+
+.prose :where(code):not(:where(pre *)) {
+  padding: 0.15em 0.35em;
+  border-radius: 0.3em;
+  background: var(--color-code-bg);
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.prose :where(code):not(:where(pre *))::before,
+.prose :where(code):not(:where(pre *))::after {
+  content: "";
+}
+
+.prose :where(pre) {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+}
+
+.prose :where(table) {
+  font-size: 0.85em;
+}
+
+.prose :where(thead th) {
+  font-weight: 600;
+}
