@@ -1,5 +1,16 @@
 from typing import Any
 from mcp.server.fastmcp import FastMCP
+from client import CIMgateClient
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("commandx")
+
+client = CIMgateClient()
 
 def get_missions(
     is_deleted: bool = False,
