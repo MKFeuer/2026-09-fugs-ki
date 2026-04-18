@@ -8,6 +8,23 @@ type Role = "user" | "assistant";
 type ConnectionStatus = "idle" | "connecting" | "ready" | "streaming" | "error";
 type ThemePreference = "system" | "light" | "dark";
 
+interface RuntimeModel {
+  id: string;
+  label: string;
+  provider: "openai" | "ollama";
+  baseUrl: string;
+  model: string;
+  supportsTools: boolean;
+  supportsVision: boolean;
+  supportsStreaming: boolean;
+}
+
+interface RuntimeConfig {
+  models: RuntimeModel[];
+  defaultModelId: string;
+  autoConnectModelId: string;
+}
+
 interface ChatMessage {
   id: string;
   role: Role;
@@ -69,9 +86,10 @@ const storageKeys = {
   theme: "agentv2.themePreference",
 };
 
-const defaultModel = "gpt-4o-mini";
+const fallbackModelId = "openai-gpt-4o-mini";
 
-const model = ref(localStorage.getItem(storageKeys.model) ?? defaultModel);
+const runtimeConfig = ref<RuntimeConfig | null>(null);
+const model = ref(localStorage.getItem(storageKeys.model) ?? "");
 const themePreference = ref<ThemePreference>((localStorage.getItem(storageKeys.theme) as ThemePreference) ?? "system");
 const systemDark = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
 const resolvedTheme = computed(() =>
@@ -93,6 +111,10 @@ const errorMessage = ref("");
 const scrollTarget = ref<HTMLDivElement | null>(null);
 const canvasRailRef = ref<HTMLDivElement | null>(null);
 const selectedCanvasByChat = ref<Record<string, string>>({});
+const autoConnectAttempted = ref(false);
+const availableModels = computed(() => runtimeConfig.value?.models ?? []);
+const selectedModel = computed(() => availableModels.value.find((entry) => entry.id === model.value) ?? null);
+const selectedModelLabel = computed(() => selectedModel.value?.label ?? (model.value || fallbackModelId));
 
 const currentChat = computed(() => {
   const current = session.value?.chats.find((chat) => chat.id === activeChatId.value);
@@ -255,13 +277,25 @@ function emit(event: ClientEvent) {
   socket.value?.send(JSON.stringify(event));
 }
 
+async function loadRuntimeConfig() {
+  const response = await fetch("/api/runtime-config");
+  if (!response.ok) {
+    throw new Error(`Runtime config request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const config = (await response.json()) as RuntimeConfig;
+  runtimeConfig.value = config;
+  model.value = config.autoConnectModelId || config.defaultModelId || model.value || fallbackModelId;
+  persistModel();
+}
+
 function connect() {
   if (socket.value && socket.value.readyState === WebSocket.OPEN) {
     socket.value.close();
   }
 
   connectionStatus.value = "connecting";
-  statusDetail.value = "Verbinde...";
+  statusDetail.value = selectedModelLabel.value !== fallbackModelId ? `Verbinde mit ${selectedModelLabel.value}` : "Verbinde...";
   errorMessage.value = "";
   persistModel();
 
@@ -270,7 +304,7 @@ function connect() {
   socket.value.addEventListener("open", () => {
     emit({
       type: "init",
-      model: model.value.trim() || defaultModel,
+      model: model.value.trim() || fallbackModelId,
       sessionId: session.value?.id,
     });
   });
@@ -470,17 +504,35 @@ function activateCanvasItem(item: CanvasItem) {
   focusCanvasItem(item.id);
 }
 
-onMounted(() => {
-  const savedSessionId = localStorage.getItem(storageKeys.sessionId);
-  seedSession(savedSessionId ?? undefined);
+  onMounted(() => {
+    const savedSessionId = localStorage.getItem(storageKeys.sessionId);
+    seedSession(savedSessionId ?? undefined);
 
-  const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  const onMqChange = (e: MediaQueryListEvent) => { systemDark.value = e.matches; };
-  mq.addEventListener("change", onMqChange);
-  onBeforeUnmount(() => mq.removeEventListener("change", onMqChange));
-});
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onMqChange = (e: MediaQueryListEvent) => { systemDark.value = e.matches; };
+    mq.addEventListener("change", onMqChange);
+    onBeforeUnmount(() => mq.removeEventListener("change", onMqChange));
 
-watch(model, persistModel);
+    loadRuntimeConfig()
+      .catch((error) => {
+        runtimeConfig.value = {
+          models: [],
+          defaultModelId: fallbackModelId,
+          autoConnectModelId: fallbackModelId,
+        };
+        model.value = model.value || fallbackModelId;
+        persistModel();
+        errorMessage.value = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        if (!autoConnectAttempted.value) {
+          autoConnectAttempted.value = true;
+          connect();
+        }
+      });
+  });
+
+  watch(model, persistModel);
 
 watch(
   resolvedTheme,
@@ -523,7 +575,14 @@ onBeforeUnmount(() => {
           <button class="theme-btn" :class="{ active: themePreference === 'system' }" title="Auto" type="button" @click="setTheme('system')">◑</button>
           <button class="theme-btn" :class="{ active: themePreference === 'dark' }" title="Dunkel" type="button" @click="setTheme('dark')">☽</button>
         </div>
-        <input v-model="model" type="text" placeholder="gpt-4o-mini" class="field field-model" />
+        <select v-model="model" class="field field-model" :disabled="availableModels.length === 0">
+          <option v-if="availableModels.length === 0" value="">
+            {{ selectedModelLabel }}
+          </option>
+          <option v-for="entry in availableModels" :key="entry.id" :value="entry.id">
+            {{ entry.label }}
+          </option>
+        </select>
         <button v-if="connectionStatus !== 'ready' && connectionStatus !== 'streaming'" class="button button-primary" type="button" @click="connect">
           Verbinden
         </button>

@@ -1,0 +1,739 @@
+import { createActivity, createChat, createSession, snapshotSession, type ActivityItem, type SessionSnapshot, type SessionState } from "../state";
+import { getRuntimeModel, type RuntimeConfig } from "../config/models";
+import { streamOpenAIChat, type OpenAIConversationMessage, type OpenAIToolDefinition, type OpenAIToolCall } from "../openai";
+import { createCanvasNote, type CanvasDiagramItem, type CanvasDiagramLayout, type CanvasImageItem, type CanvasItem, type CanvasMapItem, type CanvasNoteItem } from "../../shared/canvas";
+
+export interface ConnectionState {
+  modelId: string;
+  runtimeConfig: RuntimeConfig;
+  session: SessionState;
+  status: SessionSnapshot["status"];
+  controller?: AbortController;
+}
+
+interface ClientInitEvent {
+  type: "init";
+  model: string;
+  sessionId?: string;
+}
+
+interface ClientNewChatEvent {
+  type: "new_chat";
+}
+
+interface ClientSwitchChatEvent {
+  type: "switch_chat";
+  chatId: string;
+}
+
+interface ClientChatEvent {
+  type: "chat";
+  chatId: string;
+  messageId: string;
+  text: string;
+}
+
+type ClientEvent = ClientInitEvent | ClientNewChatEvent | ClientSwitchChatEvent | ClientChatEvent;
+
+type ServerEvent =
+  | { type: "ready"; snapshot: SessionSnapshot }
+  | { type: "session_state"; snapshot: SessionSnapshot }
+  | { type: "activity"; chatId: string; item: ActivityItem }
+  | { type: "canvas_item"; chatId: string; item: CanvasItem }
+  | { type: "canvas_clear"; chatId: string }
+  | { type: "assistant_start"; chatId: string; messageId: string }
+  | { type: "assistant_delta"; chatId: string; messageId: string; delta: string }
+  | { type: "assistant_done"; chatId: string; messageId: string; content: string }
+  | { type: "error"; message: string; detail?: string };
+
+interface ToolExecutionResult {
+  summary: string;
+  item?: CanvasItem;
+  cleared?: boolean;
+}
+
+const sessions = new Map<string, SessionState>();
+const MAX_TOOL_ROUNDS = 3;
+const MAX_CANVAS_ITEMS = 12;
+const systemPromptPath = new URL("../../system-prompt.md", import.meta.url);
+const SYSTEM_PROMPT = await Bun.file(systemPromptPath).text();
+
+function send(ws: Bun.ServerWebSocket<ConnectionState>, event: ServerEvent) {
+  ws.send(JSON.stringify(event));
+}
+
+function getChat(session: SessionState, chatId: string) {
+  const chat = session.chats.find((entry) => entry.id === chatId);
+  if (!chat) throw new Error("Chat not found");
+  return chat;
+}
+
+function emitSnapshot(ws: Bun.ServerWebSocket<ConnectionState>) {
+  const data = ws.data;
+  const model = getRuntimeModel(data.runtimeConfig, data.modelId);
+  send(ws, {
+    type: "session_state",
+    snapshot: snapshotSession(data.session, data.status, model.label),
+  });
+}
+
+function clampCanvasItems(chat: SessionState["chats"][number]) {
+  if (chat.canvasItems.length > MAX_CANVAS_ITEMS) {
+    chat.canvasItems.splice(MAX_CANVAS_ITEMS);
+  }
+}
+
+function touchChat(chat: SessionState["chats"][number]) {
+  chat.updatedAt = new Date().toISOString();
+}
+
+function parseToolArguments(text: string) {
+  if (!text.trim()) return {};
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+function toString(value: unknown, fallback: string | undefined = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function toObjectArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
+}
+
+function toNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function createCanvasMeta() {
+  return {
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function toDiagramLayout(value: unknown): CanvasDiagramLayout {
+  const layout = toString(value, "flow");
+  return layout === "radial" || layout === "timeline" || layout === "matrix" ? layout : "flow";
+}
+
+function createDiagramItem(args: Record<string, unknown>): CanvasDiagramItem {
+  const meta = createCanvasMeta();
+  const nodes = toObjectArray(args.nodes).map((node) => ({
+    id: toString(node.id),
+    label: toString(node.label),
+    detail: toString(node.detail, undefined),
+  }));
+  const edges = toObjectArray(args.edges).map((edge) => ({
+    from: toString(edge.from),
+    to: toString(edge.to),
+    label: toString(edge.label, undefined),
+  }));
+
+  if (nodes.length === 0) throw new Error("Diagramm benötigt nodes.");
+  if (edges.some((edge) => !edge.from || !edge.to)) throw new Error("Diagramm edges benötigen from/to.");
+
+  return {
+    ...meta,
+    kind: "diagram",
+    title: toString(args.title, "Diagramm"),
+    summary: toString(args.summary, "Erstelltes Diagramm"),
+    layout: toDiagramLayout(args.layout),
+    nodes,
+    edges,
+  };
+}
+
+function createImageItem(args: Record<string, unknown>): CanvasImageItem {
+  const meta = createCanvasMeta();
+  return {
+    ...meta,
+    kind: "image",
+    title: toString(args.title, "Bild"),
+    summary: toString(args.summary, "Bild auf dem Canvas"),
+    sourceUrl: toString(args.sourceUrl, undefined),
+    altText: toString(args.altText, "Bildvorschau"),
+    caption: toString(args.caption, undefined),
+  };
+}
+
+function createMapItem(args: Record<string, unknown>): CanvasMapItem {
+  const meta = createCanvasMeta();
+  const center = args.center && typeof args.center === "object" ? (args.center as Record<string, unknown>) : {};
+  return {
+    ...meta,
+    kind: "map",
+    title: toString(args.title, "Lageplan"),
+    summary: toString(args.summary, "Karten-/Lageplan-Ansicht"),
+    center: {
+      lat: toNumber(args.centerLat ?? center.lat, 48.137),
+      lng: toNumber(args.centerLng ?? center.lng, 11.575),
+    },
+    zoom: toNumber(args.zoom, 14),
+    centerLabel: toString(args.centerLabel, "Einsatz"),
+    layers: toStringArray(args.layers),
+    legend: toStringArray(args.legend),
+    markers: toObjectArray(args.markers).map((marker, index) => {
+      const markerPoint = marker.point && typeof marker.point === "object" ? (marker.point as Record<string, unknown>) : {};
+
+      return {
+        id: toString(marker.id, `marker-${index}`),
+        label: toString(marker.label, "Marker"),
+        point: {
+          lat: toNumber(marker.lat ?? markerPoint.lat, 48.137),
+          lng: toNumber(marker.lng ?? markerPoint.lng, 11.575),
+        },
+        kind: (toString(marker.kind, "point") as CanvasMapItem["markers"][number]["kind"]) ?? "point",
+        note: toString(marker.note, undefined),
+      };
+    }),
+    areas: toObjectArray(args.areas).map((area, index) => {
+      const areaCenter = area.center && typeof area.center === "object" ? (area.center as Record<string, unknown>) : {};
+
+      return {
+        id: toString(area.id, `area-${index}`),
+        label: toString(area.label, "Bereich"),
+        center: {
+          lat: toNumber(area.lat ?? areaCenter.lat, 48.137),
+          lng: toNumber(area.lng ?? areaCenter.lng, 11.575),
+        },
+        radiusMeters: toNumber(area.radiusMeters, 500),
+        color: toString(area.color, undefined),
+      };
+    }),
+    routes: toObjectArray(args.routes).map((route, index) => ({
+      id: toString(route.id, `route-${index}`),
+      name: toString(route.name, "Route"),
+      description: toString(route.description, ""),
+      points: toObjectArray(route.points).map((point) => ({
+        lat: toNumber(point.lat, 48.137),
+        lng: toNumber(point.lng, 11.575),
+      })),
+      color: toString(route.color, undefined),
+    })),
+  };
+}
+
+function createNoteItem(args: Record<string, unknown>): CanvasNoteItem {
+  const meta = createCanvasMeta();
+  return {
+    ...meta,
+    kind: "note",
+    title: toString(args.title, "Notiz"),
+    summary: toString(args.summary, "Canvas-Notiz"),
+    text: toString(args.text, "Keine Details angegeben."),
+  };
+}
+
+function clearCanvas(chat: SessionState["chats"][number]) {
+  chat.canvasItems = [
+    createCanvasNote(
+      "Canvas bereit",
+      "Noch keine Lagekarten vorhanden",
+      "Hier legt der Agent später Diagramme, Karten und Bilder ab.",
+    ),
+  ];
+}
+
+function addCanvasItem(chat: SessionState["chats"][number], item: CanvasItem) {
+  chat.canvasItems.unshift(item);
+  clampCanvasItems(chat);
+  touchChat(chat);
+  return item;
+}
+
+async function executeToolCall(
+  ws: Bun.ServerWebSocket<ConnectionState>,
+  chat: SessionState["chats"][number],
+  toolCall: OpenAIToolCall,
+): Promise<ToolExecutionResult> {
+  const args = parseToolArguments(toolCall.arguments);
+
+  switch (toolCall.name) {
+    case "canvas_create_diagram": {
+      const item = addCanvasItem(chat, createDiagramItem(args));
+      send(ws, {
+        type: "canvas_item",
+        chatId: chat.id,
+        item,
+      });
+      return {
+        summary: `Diagramm "${item.title}" angelegt.`,
+        item,
+      };
+    }
+    case "canvas_add_image": {
+      const item = addCanvasItem(chat, createImageItem(args));
+      send(ws, {
+        type: "canvas_item",
+        chatId: chat.id,
+        item,
+      });
+      return {
+        summary: `Bild "${item.title}" angelegt.`,
+        item,
+      };
+    }
+    case "canvas_create_map": {
+      const item = addCanvasItem(chat, createMapItem(args));
+      send(ws, {
+        type: "canvas_item",
+        chatId: chat.id,
+        item,
+      });
+      return {
+        summary: `Lageplan "${item.title}" angelegt.`,
+        item,
+      };
+    }
+    case "canvas_add_note": {
+      const item = addCanvasItem(chat, createNoteItem(args));
+      send(ws, {
+        type: "canvas_item",
+        chatId: chat.id,
+        item,
+      });
+      return {
+        summary: `Notiz "${item.title}" angelegt.`,
+        item,
+      };
+    }
+    case "canvas_clear": {
+      clearCanvas(chat);
+      send(ws, {
+        type: "canvas_clear",
+        chatId: chat.id,
+      });
+      return {
+        summary: "Canvas geleert.",
+        cleared: true,
+      };
+    }
+    default:
+      throw new Error(`Unbekanntes Tool: ${toolCall.name}`);
+  }
+}
+
+function canvasTools(): OpenAIToolDefinition[] {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "canvas_create_diagram",
+        description: "Erstellt ein Diagramm mit Knoten und Verbindungen auf dem Canvas.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string", description: "Kurzer Titel des Diagramms" },
+            summary: { type: "string", description: "Einzeilige Zusammenfassung" },
+            layout: {
+              type: "string",
+              enum: ["flow", "radial", "timeline", "matrix"],
+              description: "Darstellungsart des Diagramms",
+            },
+            nodes: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  detail: { type: "string" },
+                },
+                required: ["id", "label"],
+              },
+            },
+            edges: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  from: { type: "string" },
+                  to: { type: "string" },
+                  label: { type: "string" },
+                },
+                required: ["from", "to"],
+              },
+            },
+          },
+          required: ["title", "summary", "layout", "nodes", "edges"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "canvas_add_image",
+        description: "Legt ein vorhandenes Bild oder einen Bildplatzhalter auf dem Canvas ab. Keine Bildgenerierung.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            sourceUrl: { type: "string", description: "Optional: vorhandene Bild-URL" },
+            altText: { type: "string" },
+            caption: { type: "string" },
+          },
+          required: ["title", "summary", "altText"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "canvas_create_map",
+        description: "Erstellt einen OSM-basierten Lageplan mit Zentrum, Layern, Legende, Markern, Bereichen und optionalen Routen.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            centerLabel: { type: "string" },
+            centerLat: { type: "number" },
+            centerLng: { type: "number" },
+            zoom: { type: "number" },
+            layers: {
+              type: "array",
+              items: { type: "string" },
+            },
+            legend: {
+              type: "array",
+              items: { type: "string" },
+            },
+            markers: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  kind: {
+                    type: "string",
+                    enum: ["fire", "hydrant", "water", "vehicle", "point"],
+                  },
+                  lat: { type: "number" },
+                  lng: { type: "number" },
+                  note: { type: "string" },
+                },
+                required: ["label", "kind", "lat", "lng"],
+              },
+            },
+            areas: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  lat: { type: "number" },
+                  lng: { type: "number" },
+                  radiusMeters: { type: "number" },
+                  color: { type: "string" },
+                },
+                required: ["label", "lat", "lng", "radiusMeters"],
+              },
+            },
+            routes: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  description: { type: "string" },
+                  color: { type: "string" },
+                  points: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        lat: { type: "number" },
+                        lng: { type: "number" },
+                      },
+                      required: ["lat", "lng"],
+                    },
+                  },
+                },
+                required: ["name", "description", "points"],
+              },
+            },
+          },
+          required: ["title", "summary", "centerLabel", "centerLat", "centerLng", "zoom", "layers", "legend", "markers", "areas", "routes"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "canvas_add_note",
+        description: "Legt eine kurze Textnotiz auf dem Canvas ab.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            text: { type: "string" },
+          },
+          required: ["title", "summary", "text"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "canvas_clear",
+        description: "Leert den Canvas-Bereich und setzt ihn auf den Grundzustand zurück.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            reason: { type: "string" },
+          },
+        },
+      },
+    },
+  ];
+}
+
+async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: ClientChatEvent) {
+  const { session, runtimeConfig } = ws.data;
+  const model = getRuntimeModel(runtimeConfig, ws.data.modelId);
+  const chat = getChat(session, event.chatId);
+  const assistantMessageId = crypto.randomUUID();
+  const controller = new AbortController();
+  ws.data.controller = controller;
+  ws.data.status = "streaming";
+  const usedTools: string[] = [];
+
+  chat.messages.push({
+    id: event.messageId,
+    role: "user",
+    content: event.text,
+    createdAt: new Date().toISOString(),
+  });
+  chat.activities.unshift(createActivity("Nachricht empfangen", event.text.slice(0, 120)));
+  touchChat(chat);
+  session.updatedAt = chat.updatedAt;
+
+  send(ws, {
+    type: "activity",
+    chatId: chat.id,
+    item: createActivity("Denkt nach", "Lage wird analysiert und Werkzeuge werden vorbereitet.", "live"),
+  });
+  send(ws, {
+    type: "assistant_start",
+    chatId: chat.id,
+    messageId: assistantMessageId,
+  });
+
+  const conversation: OpenAIConversationMessage[] = [
+    {
+      role: "system",
+      content: `${SYSTEM_PROMPT}\n\nCanvas-Tools:\n- canvas_create_diagram: Diagramme mit Knoten/Verbindungen, Layouts: flow, radial, timeline, matrix\n- canvas_add_image: vorhandene Bilder oder Bildplatzhalter ablegen\n- canvas_create_map: Lageplan mit Zentrum, Layern, Legende und Routen\n- canvas_add_note: kurze Canvas-Notiz\n- canvas_clear: Canvas leeren\n\nNutze die Tools aktiv, wenn du Diagramme, Karten, Bilder oder Planungsartefakte ablegen willst.`,
+    },
+    ...chat.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+  ];
+
+  let assistantContent = "";
+
+  try {
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+      send(ws, {
+        type: "activity",
+        chatId: chat.id,
+        item: createActivity(
+          round === 0 ? "Planung" : "Weiterdenken",
+          round === 0 ? "Erste Antwort und mögliche Canvas-Aktionen werden vorbereitet." : "Tool-Ergebnisse werden ausgewertet.",
+          "live",
+        ),
+      });
+
+      const result = await streamOpenAIChat({
+        apiKey: model.apiKey,
+        baseUrl: model.baseUrl,
+        model: model.model,
+        messages: conversation,
+        tools: canvasTools(),
+        signal: controller.signal,
+        onContentDelta: (delta) => {
+          assistantContent += delta;
+          send(ws, {
+            type: "assistant_delta",
+            chatId: chat.id,
+            messageId: assistantMessageId,
+            delta,
+          });
+        },
+      });
+
+      if (result.toolCalls.length === 0) {
+        break;
+      }
+
+      conversation.push({
+        role: "assistant",
+        content: result.content,
+        tool_calls: result.toolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          type: "function",
+          function: {
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          },
+        })),
+      });
+
+      for (const toolCall of result.toolCalls) {
+        usedTools.push(toolCall.name);
+        send(ws, {
+          type: "activity",
+          chatId: chat.id,
+          item: createActivity("Tool", toolCall.name, "live"),
+        });
+
+        const execution = await executeToolCall(ws, chat, toolCall);
+        chat.activities.unshift(createActivity("Canvas aktualisiert", execution.summary, "live"));
+        send(ws, {
+          type: "activity",
+          chatId: chat.id,
+          item: createActivity("Ergebnis", execution.summary, "live"),
+        });
+
+        conversation.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(execution),
+        });
+      }
+
+      touchChat(chat);
+      session.updatedAt = chat.updatedAt;
+      send(ws, {
+        type: "session_state",
+        snapshot: snapshotSession(session, ws.data.status, model.label),
+      });
+
+      if (result.finishReason !== "tool_calls") {
+        break;
+      }
+    }
+
+    const toolSummary = usedTools.length > 0 ? `\nVerwendete Tools: ${[...new Set(usedTools)].join(", ")}` : "";
+    const finalContent = `${assistantContent.trim() || "Canvas-Aktionen wurden ausgeführt."}${toolSummary}`;
+
+    chat.messages.push({
+      id: assistantMessageId,
+      role: "assistant",
+      content: finalContent,
+      createdAt: new Date().toISOString(),
+    });
+    chat.activities.unshift(createActivity("Antwort fertig", finalContent.slice(0, 120), "live"));
+    touchChat(chat);
+    session.updatedAt = chat.updatedAt;
+    ws.data.status = "ready";
+    send(ws, {
+      type: "assistant_done",
+      chatId: chat.id,
+      messageId: assistantMessageId,
+      content: finalContent,
+    });
+    emitSnapshot(ws);
+  } catch (error) {
+    ws.data.status = "error";
+    send(ws, {
+      type: "error",
+      message: "LLM Antwort fehlgeschlagen.",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    ws.data.controller = undefined;
+  }
+}
+
+export function createWebSocketHandlers(runtimeConfig: RuntimeConfig) {
+  return {
+    open() {},
+    async message(ws: Bun.ServerWebSocket<ConnectionState>, raw: string | ArrayBuffer | Uint8Array) {
+      const event = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw)) as ClientEvent;
+
+      if (event.type === "init") {
+        const existingSession = event.sessionId ? sessions.get(event.sessionId) : undefined;
+        const session = existingSession ?? createSession(event.sessionId);
+        const selectedModel = getRuntimeModel(runtimeConfig, event.model);
+
+        sessions.set(session.id, session);
+        ws.data = {
+          modelId: selectedModel.id,
+          runtimeConfig,
+          session,
+          status: "ready",
+        };
+        send(ws, {
+          type: "ready",
+          snapshot: snapshotSession(session, "ready", selectedModel.label),
+        });
+        return;
+      }
+
+      if (!ws.data?.session) {
+        throw new Error("WebSocket not initialized.");
+      }
+
+      if (event.type === "new_chat") {
+        const chat = createChat();
+        ws.data.session.chats.unshift(chat);
+        ws.data.session.activeChatId = chat.id;
+        touchChat(chat);
+        ws.data.session.updatedAt = new Date().toISOString();
+        emitSnapshot(ws);
+        return;
+      }
+
+      if (event.type === "switch_chat") {
+        const chat = getChat(ws.data.session, event.chatId);
+        ws.data.session.activeChatId = chat.id;
+        ws.data.session.updatedAt = new Date().toISOString();
+        emitSnapshot(ws);
+        return;
+      }
+
+      if (event.type === "chat") {
+        if (ws.data.controller) {
+          ws.data.controller.abort();
+        }
+        ws.data.session.activeChatId = event.chatId;
+        await handleChat(ws, event);
+      }
+    },
+    close(ws: Bun.ServerWebSocket<ConnectionState>) {
+      ws.data.controller?.abort();
+    },
+  };
+}

@@ -45,7 +45,8 @@ interface PendingToolCall {
 }
 
 interface StreamOptions {
-  apiKey: string;
+  apiKey?: string;
+  baseUrl?: string;
   model: string;
   messages: OpenAIConversationMessage[];
   signal: AbortSignal;
@@ -59,22 +60,24 @@ export interface StreamResult {
   finishReason: string | null;
 }
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
 export async function streamOpenAIChat({
   apiKey,
+  baseUrl = DEFAULT_OPENAI_BASE_URL,
   model,
   messages,
   signal,
   tools,
   onContentDelta,
 }: StreamOptions): Promise<StreamResult> {
-  const response = await fetch(OPENAI_URL, {
+  const endpoint = new URL("chat/completions", `${baseUrl.replace(/\/+$/, "")}/`);
+  const response = await fetch(endpoint, {
     method: "POST",
     signal,
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify({
       model,
