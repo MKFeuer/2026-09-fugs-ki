@@ -3,6 +3,8 @@ import { getRuntimeModel, type RuntimeConfig } from "../config/models";
 import { streamOpenAICompatibleChat, type OpenAIConversationMessage, type OpenAIToolDefinition, type OpenAIToolCall } from "../openai";
 import { createCanvasNote, type CanvasDiagramItem, type CanvasDiagramLayout, type CanvasImageItem, type CanvasItem, type CanvasMapItem, type CanvasNoteItem } from "../../shared/canvas";
 import { createTurn, summarizeTurn, type ChatTurn, type TurnActionItem } from "../../shared/turn";
+import { saveSession, loadSession } from "../db/persistence";
+import { createSessionCookieHeader } from "../http/cookies";
 
 export interface ConnectionState {
   modelId: string;
@@ -79,6 +81,19 @@ function emitSnapshot(ws: Bun.ServerWebSocket<ConnectionState>) {
   send(ws, {
     type: "session_state",
     snapshot: snapshotSession(data.session, data.status, model.label),
+  });
+  // Persist session after every state change
+  persistSessionAsync(data.session);
+}
+
+function persistSessionAsync(session: SessionState) {
+  // Non-blocking save to database
+  Promise.resolve().then(() => {
+    try {
+      saveSession(session);
+    } catch (error) {
+      console.error("Failed to persist session:", error);
+    }
   });
 }
 
@@ -787,8 +802,25 @@ export function createWebSocketHandlers(runtimeConfig: RuntimeConfig) {
       const event = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw)) as ClientEvent;
 
       if (event.type === "init") {
-        const existingSession = event.sessionId ? sessions.get(event.sessionId) : undefined;
-        const session = existingSession ?? createSession(event.sessionId);
+        let session = event.sessionId ? sessions.get(event.sessionId) : undefined;
+        
+        // Try to load from database if not in memory
+        if (!session && event.sessionId) {
+          try {
+            const dbSession = loadSession(event.sessionId);
+            if (dbSession) {
+              session = dbSession;
+            }
+          } catch (error) {
+            console.error("Failed to load session from database:", error);
+          }
+        }
+        
+        // Fall back to creating a new session
+        if (!session) {
+          session = createSession(event.sessionId);
+        }
+        
         const selectedModel = getRuntimeModel(runtimeConfig, event.model);
 
         sessions.set(session.id, session);
@@ -798,6 +830,10 @@ export function createWebSocketHandlers(runtimeConfig: RuntimeConfig) {
           session,
           status: "ready",
         };
+        
+        const headers = new Headers();
+        headers.set("Set-Cookie", createSessionCookieHeader(session.id));
+        
         send(ws, {
           type: "ready",
           snapshot: snapshotSession(session, "ready", selectedModel.label),

@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { toPublicRuntimeConfig, type RuntimeConfig } from "../config/models";
+import { parseSessionCookie, createSessionCookieHeader } from "./cookies";
+import { loadSession, saveSession } from "../db/persistence";
 
 interface HttpHandlerOptions {
   runtimeConfig: RuntimeConfig;
@@ -20,6 +22,47 @@ export function createHttpHandler({ runtimeConfig, distDir }: HttpHandlerOptions
 
     if (req.method === "GET" && url.pathname === "/api/runtime-config") {
       return Response.json(toPublicRuntimeConfig(runtimeConfig));
+    }
+
+    // Session recovery endpoint
+    if (req.method === "GET" && url.pathname === "/api/session") {
+      const cookieHeader = req.headers.get("cookie");
+      const sessionId = parseSessionCookie(cookieHeader);
+      
+      if (sessionId) {
+        const session = loadSession(sessionId);
+        if (session) {
+          return Response.json({ session, recovered: true });
+        }
+      }
+      
+      return Response.json({ recovered: false }, { status: 404 });
+    }
+
+    // Chat history endpoint
+    if (req.method === "GET" && url.pathname === "/api/session/chats") {
+      const cookieHeader = req.headers.get("cookie");
+      const sessionId = parseSessionCookie(cookieHeader);
+      
+      if (!sessionId) {
+        return Response.json({ error: "No session" }, { status: 401 });
+      }
+      
+      const session = loadSession(sessionId);
+      if (!session) {
+        return Response.json({ error: "Session not found" }, { status: 404 });
+      }
+      
+      // Return chat summaries (for history list)
+      const chatSummaries = session.chats.map((chat) => ({
+        id: chat.id,
+        title: chat.title,
+        messageCount: chat.messages.length,
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+      }));
+      
+      return Response.json({ chats: chatSummaries });
     }
 
     if (process.env.NODE_ENV === "production") {

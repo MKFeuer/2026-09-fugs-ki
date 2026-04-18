@@ -231,7 +231,29 @@ function createLocalSession(sessionId?: string): SessionState {
   };
 }
 
-function seedSession(sessionId?: string) {
+async function seedSession(sessionId?: string) {
+  const id = sessionId ?? localStorage.getItem(storageKeys.sessionId);
+  
+  // Try to recover session from server
+  if (id) {
+    try {
+      const resp = await fetch("/api/session", {
+        credentials: "include",
+      });
+      
+      if (resp.ok) {
+        const data = (await resp.json()) as { session: SessionState; recovered: boolean };
+        session.value = data.session;
+        activeChatId.value = data.session.activeChatId;
+        persistSessionId(data.session.id);
+        return;
+      }
+    } catch (error) {
+      console.error("Failed to recover session:", error);
+    }
+  }
+  
+  // Fall back to local session creation
   session.value = createLocalSession(sessionId);
   activeChatId.value = session.value.activeChatId;
   persistSessionId(session.value.id);
@@ -640,9 +662,9 @@ function activateCanvasItem(item: CanvasItem) {
   focusCanvasItem(item.id);
 }
 
-  onMounted(() => {
+  onMounted(async () => {
     const savedSessionId = localStorage.getItem(storageKeys.sessionId);
-    seedSession(savedSessionId ?? undefined);
+    await seedSession(savedSessionId ?? undefined);
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onMqChange = (e: MediaQueryListEvent) => { systemDark.value = e.matches; };
