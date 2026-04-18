@@ -52,7 +52,25 @@ interface ClientCanvasItemRemoveEvent {
   itemId: string;
 }
 
-type ClientEvent = ClientInitEvent | ClientNewChatEvent | ClientSwitchChatEvent | ClientChatEvent | ClientCanvasItemRemoveEvent;
+interface ClientRenameChatEvent {
+  type: "rename_chat";
+  chatId: string;
+  title: string;
+}
+
+interface ClientDeleteChatEvent {
+  type: "delete_chat";
+  chatId: string;
+}
+
+type ClientEvent =
+  | ClientInitEvent
+  | ClientNewChatEvent
+  | ClientSwitchChatEvent
+  | ClientChatEvent
+  | ClientCanvasItemRemoveEvent
+  | ClientRenameChatEvent
+  | ClientDeleteChatEvent;
 
 type ServerEvent =
   | { type: "ready"; snapshot: SessionSnapshot }
@@ -1149,6 +1167,29 @@ export function createWebSocketHandlers(runtimeConfig: RuntimeConfig) {
         chat.canvasItems = chat.canvasItems.filter((item) => item.id !== event.itemId);
         touchChat(chat);
         ws.data.session.updatedAt = chat.updatedAt;
+        emitSnapshot(ws);
+        return;
+      }
+
+      if (event.type === "rename_chat") {
+        const chat = ws.data.session.chats.find((c) => c.id === event.chatId);
+        if (chat && event.title.trim()) {
+          chat.title = event.title.trim().slice(0, 60);
+          touchChat(chat);
+          ws.data.session.updatedAt = chat.updatedAt;
+          persistSessionAsync(ws.data.session);
+        }
+        return;
+      }
+
+      if (event.type === "delete_chat") {
+        const session = ws.data.session;
+        if (session.chats.length <= 1) return;
+        session.chats = session.chats.filter((c) => c.id !== event.chatId);
+        if (session.activeChatId === event.chatId) {
+          session.activeChatId = session.chats[0].id;
+        }
+        session.updatedAt = new Date().toISOString();
         emitSnapshot(ws);
         return;
       }

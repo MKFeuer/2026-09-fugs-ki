@@ -4,4 +4,11 @@ import "./styles.css";
 import { createApp } from "vue";
 import App from "./App.vue";
 
-createApp(App).mount("#app");
+const app = createApp(App);
+
+// Auto-focus directive for inputs rendered via v-if
+app.directive("focus", {
+  mounted(el: HTMLElement) { el.focus(); },
+});
+
+app.mount("#app");
