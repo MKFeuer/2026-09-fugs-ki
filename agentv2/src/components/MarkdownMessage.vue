@@ -41,6 +41,7 @@ function renderMarkdown(input: string) {
   let codeLines: string[] = [];
   let codeLanguage = "";
   let inCode = false;
+  let tableRows: string[] = [];
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
@@ -71,6 +72,26 @@ function renderMarkdown(input: string) {
     inCode = false;
   };
 
+  const flushTable = () => {
+    if (tableRows.length === 0) return;
+    const parseRow = (row: string) => row.split("|").slice(1, -1).map((cell) => cell.trim());
+    const isSepRow = (row: string) => parseRow(row).every((cell) => /^:?-+:?$/.test(cell));
+    if (tableRows.length < 2 || !isSepRow(tableRows[1])) {
+      for (const row of tableRows) paragraph.push(row);
+      tableRows = [];
+      return;
+    }
+    const headerCells = parseRow(tableRows[0]);
+    const dataRows = tableRows.slice(2);
+    const thead = `<thead><tr>${headerCells.map((c) => `<th>${formatInline(c)}</th>`).join("")}</tr></thead>`;
+    const tbody =
+      dataRows.length > 0
+        ? `<tbody>${dataRows.map((row) => `<tr>${parseRow(row).map((c) => `<td>${formatInline(c)}</td>`).join("")}</tr>`).join("")}</tbody>`
+        : "";
+    blocks.push(`<div class="md-table-wrap"><table>${thead}${tbody}</table></div>`);
+    tableRows = [];
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
 
@@ -81,6 +102,7 @@ function renderMarkdown(input: string) {
         flushParagraph();
         flushList();
         flushQuote();
+        flushTable();
         inCode = true;
         codeLanguage = line.slice(3).trim();
       }
@@ -96,6 +118,7 @@ function renderMarkdown(input: string) {
       flushParagraph();
       flushList();
       flushQuote();
+      flushTable();
       continue;
     }
 
@@ -104,6 +127,7 @@ function renderMarkdown(input: string) {
       flushParagraph();
       flushList();
       flushQuote();
+      flushTable();
       const level = heading[1].length;
       blocks.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
       continue;
@@ -113,6 +137,7 @@ function renderMarkdown(input: string) {
     if (quote) {
       flushParagraph();
       flushList();
+      flushTable();
       quoteLines.push(quote[1]);
       continue;
     }
@@ -122,6 +147,7 @@ function renderMarkdown(input: string) {
     if (bullet || ordered) {
       flushParagraph();
       flushQuote();
+      flushTable();
       const type = ordered ? "ol" : "ul";
       if (listType && listType !== type) flushList();
       listType = type;
@@ -130,6 +156,15 @@ function renderMarkdown(input: string) {
       continue;
     }
 
+    if (/^\|.+\|$/.test(line.trim())) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      tableRows.push(line.trim());
+      continue;
+    }
+
+    flushTable();
     flushList();
     flushQuote();
     paragraph.push(line);
@@ -139,6 +174,7 @@ function renderMarkdown(input: string) {
   flushList();
   flushQuote();
   flushCode();
+  flushTable();
 
   return blocks.join("");
 }
