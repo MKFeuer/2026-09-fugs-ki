@@ -766,7 +766,7 @@ onBeforeUnmount(() => {
       <div class="brand">
         <div class="brand-mark">f</div>
         <div>
-          <div class="brand-name">agentv2</div>
+          <div class="brand-name">FUGS Agent</div>
           <div class="brand-subtitle">Lageplanung in Echtzeit</div>
         </div>
       </div>

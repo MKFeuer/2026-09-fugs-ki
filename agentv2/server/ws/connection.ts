@@ -1,7 +1,7 @@
 import { createActivity, createChat, createSession, snapshotSession, type ActivityItem, type SessionSnapshot, type SessionState } from "../state";
 import { getRuntimeModel, type RuntimeConfig } from "../config/models";
 import { streamOpenAICompatibleChat, type OpenAIConversationMessage, type OpenAIToolDefinition, type OpenAIToolCall } from "../openai";
-import { createCanvasNote, type CanvasItem, type CanvasMapItem, type CanvasMapPolygon, type CanvasMapLabel, type CanvasMapWind } from "../../shared/canvas";
+import { type CanvasItem, type CanvasMapItem, type CanvasMapPolygon, type CanvasMapLabel, type CanvasMapWind } from "../../shared/canvas";
 import { createTurn, summarizeTurn, type ChatTurn, type TurnActionItem } from "../../shared/turn";
 import { saveSession, loadSession } from "../db/persistence";
 import { createSessionCookieHeader } from "../http/cookies";
@@ -154,13 +154,8 @@ function appendTurnAction(chat: SessionState["chats"][number], turnId: string, a
 }
 
 function clearCanvas(chat: SessionState["chats"][number]) {
-  chat.canvasItems = [
-    createCanvasNote(
-      "Canvas bereit",
-      "Noch keine Visualisierung vorhanden",
-      "Hier legt der Agent später Diagramme, Charts, Karten und Bilder ab.",
-    ),
-  ];
+  chat.canvasItems = [];
+  touchChat(chat);
 }
 
 function addCanvasItem(chat: SessionState["chats"][number], item: CanvasItem) {
