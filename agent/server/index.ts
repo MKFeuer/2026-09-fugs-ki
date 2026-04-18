@@ -53,18 +53,13 @@ type MCPServerEntry =
   | { command: string; args?: string[]; label?: string }
   | { url: string; transport?: "sse" | "http"; headers?: Record<string, string>; label?: string };
 
-async function initMCP() {
-  const servers: MCPServerEntry[] = config.mcpServers ?? [];
+const MAX_RETRIES = 10;
+const RETRY_DELAY_MS = 3000;
 
-  if (servers.length === 0) {
-    console.log("No MCP servers configured");
-    return;
-  }
+async function connectMCPServer(entry: MCPServerEntry): Promise<MCPClient | null> {
+  const name = entry.label ?? ("command" in entry ? entry.command : entry.url);
 
-  console.log(`Connecting to ${servers.length} MCP server(s)...`);
-
-  for (const entry of servers) {
-    const name = entry.label ?? ("command" in entry ? entry.command : entry.url);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const client =
         "command" in entry
@@ -80,14 +75,36 @@ async function initMCP() {
                   ? { type: "sse" as const, url: entry.url, headers: entry.headers }
                   : { type: "http" as const, url: entry.url, headers: entry.headers },
             });
-      mcpClients.push(client);
 
       const tools = await client.tools();
       allTools = { ...allTools, ...tools };
       console.log(`  ${name} → ${Object.keys(tools).length} tools`);
+      return client;
     } catch (err) {
-      console.error(`  Failed: ${name}:`, err);
+      if (attempt < MAX_RETRIES) {
+        console.warn(`  ${name} attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${RETRY_DELAY_MS / 1000}s...`);
+        await Bun.sleep(RETRY_DELAY_MS);
+      } else {
+        console.error(`  ${name} failed after ${MAX_RETRIES} attempts:`, err);
+      }
     }
+  }
+  return null;
+}
+
+async function initMCP() {
+  const servers: MCPServerEntry[] = config.mcpServers ?? [];
+
+  if (servers.length === 0) {
+    console.log("No MCP servers configured");
+    return;
+  }
+
+  console.log(`Connecting to ${servers.length} MCP server(s)...`);
+
+  const results = await Promise.all(servers.map(connectMCPServer));
+  for (const client of results) {
+    if (client) mcpClients.push(client);
   }
 
   console.log("MCP ready. Tools:", Object.keys(allTools).join(", ") || "(none)");

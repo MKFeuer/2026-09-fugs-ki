@@ -13,11 +13,25 @@ function partKey(messageId: string, part: UIMessage["parts"][number], index: num
   return `${messageId}-${part.type}-${index}`;
 }
 
+function countChars(message: UIMessage): number {
+  let chars = 0;
+  for (const part of message.parts) {
+    if (part.type === "text") chars += part.text.length;
+  }
+  return chars;
+}
+
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const chars = countChars(message);
 
   return (
-    <div className={cn("msg-enter flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("msg-enter flex items-end gap-1", isUser ? "justify-end" : "justify-start")}>
+      {!isUser && (
+        <span className="group relative mb-1 cursor-default text-[var(--color-text-muted)] opacity-40 hover:opacity-80" title={`${chars.toLocaleString()} chars`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        </span>
+      )}
       <div
         className={cn(
           "max-w-[85%] text-base leading-relaxed",
@@ -72,6 +86,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
           return null;
         })}
       </div>
+      {isUser && (
+        <span className="group relative mb-1 cursor-default text-[var(--color-text-muted)] opacity-40 hover:opacity-80" title={`${chars.toLocaleString()} chars`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        </span>
+      )}
     </div>
   );
 }
