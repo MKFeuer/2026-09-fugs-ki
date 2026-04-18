@@ -8,6 +8,11 @@ export interface RuntimeEnvConfig {
   ollamaEnabled: boolean;
   ollamaBaseUrl: string;
   ollamaModel: string;
+  localLlmEnabled: boolean;
+  localLlmBaseUrl: string;
+  localLlmModel: string;
+  localLlmLabel: string | null;
+  localLlmApiKey: string | null;
   defaultModelId: string | null;
   autoConnectModelId: string | null;
 }
@@ -47,6 +52,13 @@ export function loadRuntimeEnvConfig(): RuntimeEnvConfig {
   const ollamaBaseUrl = readText(process.env.OLLAMA_BASE_URL) ?? "http://localhost:11434/v1";
   const ollamaModel = readText(process.env.OLLAMA_MODEL) ?? legacyModel ?? "qwen2.5:14b";
 
+  const localLlmBaseUrl = readText(process.env.LOCAL_LLM_BASE_URL);
+  const localLlmModel = readText(process.env.LOCAL_LLM_MODEL);
+  const localLlmEnabled = readBoolean(
+    process.env.LOCAL_LLM_ENABLED,
+    Boolean(localLlmBaseUrl) || Boolean(localLlmModel),
+  );
+
   return {
     legacyProvider,
     legacyModel,
@@ -57,6 +69,11 @@ export function loadRuntimeEnvConfig(): RuntimeEnvConfig {
     ollamaEnabled,
     ollamaBaseUrl,
     ollamaModel,
+    localLlmEnabled,
+    localLlmBaseUrl: localLlmBaseUrl ?? "http://localhost:8080/v1",
+    localLlmModel: localLlmModel ?? "local-model",
+    localLlmLabel: readText(process.env.LOCAL_LLM_LABEL),
+    localLlmApiKey: readText(process.env.LOCAL_LLM_API_KEY),
     defaultModelId: readText(process.env.DEFAULT_MODEL_ID),
     autoConnectModelId: readText(process.env.AUTO_CONNECT_MODEL_ID),
   };

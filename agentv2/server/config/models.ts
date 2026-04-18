@@ -1,6 +1,6 @@
 import { loadRuntimeEnvConfig } from "./env";
 
-export type RuntimeModelProvider = "openai" | "ollama";
+export type RuntimeModelProvider = "openai" | "ollama" | "local-llm";
 
 export interface RuntimeModelConfig {
   id: string;
@@ -57,6 +57,21 @@ function createOpenAIModel(env: ReturnType<typeof loadRuntimeEnvConfig>): Runtim
   };
 }
 
+function createLocalLlmModel(env: ReturnType<typeof loadRuntimeEnvConfig>): RuntimeModelConfig | null {
+  if (!env.localLlmEnabled) return null;
+  return {
+    id: `local-llm-${slugify(env.localLlmModel)}`,
+    label: env.localLlmLabel ?? `Local LLM / ${env.localLlmModel}`,
+    provider: "local-llm",
+    baseUrl: env.localLlmBaseUrl,
+    model: env.localLlmModel,
+    ...(env.localLlmApiKey ? { apiKey: env.localLlmApiKey } : {}),
+    supportsTools: true,
+    supportsVision: false,
+    supportsStreaming: true,
+  };
+}
+
 function createOllamaModel(env: ReturnType<typeof loadRuntimeEnvConfig>): RuntimeModelConfig | null {
   if (!env.ollamaEnabled) return null;
   return {
@@ -91,6 +106,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
 
   const openaiModel = createOpenAIModel(env);
   const ollamaModel = createOllamaModel(env);
+  const localLlmModel = createLocalLlmModel(env);
 
   if (env.legacyProvider === "ollama") {
     if (ollamaModel) models.push(ollamaModel);
@@ -99,9 +115,10 @@ export function loadRuntimeConfig(): RuntimeConfig {
     if (openaiModel) models.push(openaiModel);
     if (ollamaModel) models.push(ollamaModel);
   }
+  if (localLlmModel) models.push(localLlmModel);
 
   if (models.length === 0) {
-    throw new Error("No LLM models configured. Set OPENAI_API_KEY or enable Ollama in .env.");
+    throw new Error("No LLM models configured. Set OPENAI_API_KEY, enable Ollama, or set LOCAL_LLM_BASE_URL in .env.");
   }
 
   const preferredSingleModelId = models.length === 1 ? models[0].id : undefined;
