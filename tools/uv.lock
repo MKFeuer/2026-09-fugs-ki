@@ -896,6 +896,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "geographiclib" },
+    { name = "httpx" },
     { name = "mcp", extra = ["cli"] },
     { name = "overpy" },
     { name = "requests" },
@@ -910,6 +911,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "geographiclib", specifier = ">=2.1" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.27.0" },
     { name = "overpy", specifier = ">=0.7" },
     { name = "requests", specifier = ">=2.33.1" },
