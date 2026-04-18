@@ -449,7 +449,7 @@ async function executeToolCall(
 
         return {
           summary: result.success
-            ? `Tool ${toolCall.name} erfolgreich ausgeführt (${result.duration}ms)`
+            ? JSON.stringify(result.result)
             : `Tool ${toolCall.name} fehlgeschlagen: ${result.error}`,
           action,
         };
