@@ -1,33 +1,31 @@
 services:
   tools:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-tools:0.0.3-beta
+    build: ./tools
+    container_name: tools
     ports:
       - "3002:8000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/tools/list"]
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000/"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
+      start_period: 10s
       retries: 3
 
   commandx:
-    image: ghcr.io/feuerwehrhackathon2024/mcp-commandx:0.0.3-beta
+    build: ./commandx
+    container_name: commandx
     ports:
       - "3003:8000"
+    env_file:
+      - ./commandx/.env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/tools/list"]
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000/"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
+      start_period: 10s
       retries: 3
-
-  agent:
-    build: ./agent
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./agent/config.json:/app/config.json:ro
-    restart: unless-stopped
 
   # agentv2 - New version with MCP support
   agentv2:
@@ -57,3 +55,9 @@ volumes:
   agentv2-data:
     driver: local
 
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/28

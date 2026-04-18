@@ -152,15 +152,13 @@ const server = Bun.serve({
       try {
         const { messages } = (await req.json()) as { messages: UIMessage[] };
         const modelMessages = await convertToModelMessages(messages);
-
-        const system = `${BASE_PROMPT}\n\n[Aktuelle Zeit: ${new Date().toISOString()}]`;
-
+        
         const activeModel = models[activeModelIndex];
         console.log(`Chat request → ${activeModel.label}`);
 
         const result = streamText({
           model: activeModel.instance,
-          system,
+          system: BASE_PROMPT,
           messages: modelMessages,
           tools: allTools as Parameters<typeof streamText>[0]["tools"],
           stopWhen: stepCountIs(10),
