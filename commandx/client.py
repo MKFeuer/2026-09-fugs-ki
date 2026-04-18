@@ -54,3 +54,19 @@ class CIMgateClient:
         log.info("      → %s", resp.status_code)
         resp.raise_for_status()
         return resp.json()
+    
+    def post(self, path: str, json: dict[str, Any]) -> Any:
+        url = f"{self._base_url}/rest-api/{path.lstrip('/')}"
+        headers = self._headers()
+        log.info("POST  %s  json=%s", url, json)
+        log.info("POST  Headers: %s", headers)
+        resp = httpx.post(
+            url,
+            headers=headers,
+            json=json,
+            verify=self._verify_ssl,
+            timeout=30,
+        )
+        log.info("      → %s", resp.status_code)
+        resp.raise_for_status()
+        return resp.json()
