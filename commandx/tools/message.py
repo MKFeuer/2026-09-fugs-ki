@@ -31,12 +31,12 @@ def read_messages(mission_id: str, limit: int | None = None) -> list[dict]:
         for message in messages
     ]
 
-def send_message(mission_id: str, message: str) -> dict:
+def send_message(mission_id: str, message: str, receiver_name: str = "unbekannter Empfänger") -> dict:
     log.info("TOOL  send_message")
     return client.post(("mission/" + mission_id + "/message"), json={
         "text": message,
         "sendername": "AI",
-        "recivername": "unbekannter Empfänger",
+        "recivername": receiver_name,
         "messagestatus": 1
     })
 
@@ -49,6 +49,7 @@ def register_message_tools(mcp: FastMCP) -> None:
         Args:
             mission_id (uuid as str): The ID of the mission to which the message should be sent.
             message (str): The content of the message to be sent.
+            receiver_name (str optional): The name of the message receiver. Default is "unbekannter Empfänger".
             Sender is automatically prefilled.
         """)
     mcp.add_tool(
