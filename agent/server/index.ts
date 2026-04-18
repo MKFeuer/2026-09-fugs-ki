@@ -134,6 +134,7 @@ function modelsResponse() {
 
 const server = Bun.serve({
   port: PORT,
+  hostname: "0.0.0.0",
   idleTimeout: 255,
 
   async fetch(req, bunServer) {

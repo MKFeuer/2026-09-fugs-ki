@@ -88,6 +88,25 @@ function ModelDropdown({
   );
 }
 
+function ModelSelector(props: Pick<ChatHeaderProps, "modelState" | "onSelectModel" | "disabled">) {
+  const [hidden, setHidden] = useState(false);
+
+  if (hidden) return null;
+
+  return (
+    <div className="flex items-center gap-1">
+      <ModelDropdown {...props} />
+      <button
+        type="button"
+        onClick={() => setHidden(true)}
+        className="rounded-lg px-2 py-1 text-xs text-[var(--color-text-muted)] opacity-60 transition-opacity hover:opacity-100"
+      >
+        Hide
+      </button>
+    </div>
+  );
+}
+
 export function ChatHeader({
   modelState,
   onSelectModel,
@@ -120,7 +139,7 @@ export function ChatHeader({
 
         <div className="flex items-center gap-2">
           {modelState.models.length > 1 && (
-            <ModelDropdown
+            <ModelSelector
               modelState={modelState}
               onSelectModel={onSelectModel}
               disabled={disabled}

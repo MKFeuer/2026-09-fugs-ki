@@ -69,7 +69,7 @@ export default function App() {
         disabled={isLoading}
       />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-smooth">
         <div className="flex min-h-full flex-col">
           <div className="flex-1 px-4 py-6">
             <div className="mx-auto flex max-w-3xl flex-col gap-5">
