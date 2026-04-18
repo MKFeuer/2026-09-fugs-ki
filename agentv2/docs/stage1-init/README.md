@@ -3,6 +3,9 @@
 ## Ziel
 Eine erste arbeitsfähige Version von `agentv2` mit schneller Live-Chat-Basis.
 
+## Status
+`partial`
+
 ## Enthalten
 - Vue-Frontend
 - LLM-Konfiguration aus `.env`
@@ -12,6 +15,21 @@ Eine erste arbeitsfähige Version von `agentv2` mit schneller Live-Chat-Basis.
 - Stilgrundlage aus `agent/`
 - automatischer Verbindungsaufbau zum konfigurierten LLM nach dem Laden
 - sichtbarer Verbindungsstatus oben rechts
+
+## Davon im Code heute tatsächlich schon vorhanden
+- Vue-Frontend und Bun-Backend
+- WebSocket-Chat
+- sichtbarer Statuschip
+- manuelle Verbindung
+- OpenAI-Streaming mit `OPENAI_API_KEY`
+- Session-Wiederaufnahme über `sessionId` im Browser und In-Memory-Sessionstore
+
+## Davon noch nicht auf Zielniveau
+- echte `.env`-gestützte Modellregistry
+- Auto-Connect beim Laden
+- `Connected` als verbindlicher Zustand zum konfigurierten Modell
+- sichere Session-Verwaltung
+- persistente Sessions
 
 ## Noch nicht enthalten
 - MCP-Integration
@@ -32,3 +50,12 @@ Deshalb gilt:
 - OpenAI und Ollama werden beide über die Serverkonfiguration unterstützt
 - die UI verbindet sich beim Laden automatisch mit dem konfigurierten Modell
 - der Header zeigt danach klar `Connected`, `Connecting` oder `Error`
+
+## Einordnung
+Diese Zielregel ist aktuell noch nicht vollständig umgesetzt.
+
+Der derzeitige Stand ist:
+- Statusanzeige vorhanden
+- manuelles Verbinden vorhanden
+- Auto-Connect noch offen
+- Ollama noch offen

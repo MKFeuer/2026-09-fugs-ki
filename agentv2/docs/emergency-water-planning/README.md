@@ -19,3 +19,9 @@ Ein neuer Chat wird für eine Brandlage eröffnet und unterstützt die Wasser- u
 
 ## Ziel
 Die Lage soll in einer interaktiven Karte schnell erfassbar werden, damit Planung und Nachvollziehbarkeit im Einsatz direkt sichtbar sind.
+
+## Karten-UX
+- Hydranten, Wasserquellen, Gefahrenbereiche und Routen müssen einzeln ausblendbar sein.
+- Punkte dürfen nur einmal erscheinen und müssen auf der Karte exakt an der berechneten Position liegen.
+- Die Karte soll im Fokus-Modus und im Vollmodus dieselbe Geometrie verwenden.
+- Der Vollmodus soll Zoom, Pan und Fit-to-content erlauben, damit alle relevanten Elemente sichtbar werden.

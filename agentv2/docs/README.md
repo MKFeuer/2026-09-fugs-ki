@@ -3,6 +3,8 @@
 ## Zweck
 Dieses Verzeichnis hält die fachlichen und technischen Entscheidungen für `agentv2` fest, bevor die nächste Ausbaustufe umgesetzt wird.
 
+Für den tatsächlichen Projektstatus und die nächsten konkreten Schritte ist `docs/roadmap/` die führende Übersicht.
+
 `agentv2` soll kein zweiter Chat-MVP sein, sondern eine beobachtbare Arbeitsoberfläche für Lageführung:
 
 - links Chat und Verlauf
@@ -62,6 +64,8 @@ Dieses Verzeichnis hält die fachlichen und technischen Entscheidungen für `age
 - Aktivitäten, Tool-Aufrufe und visuelle Artefakte bleiben dadurch nachvollziehbar und wiedereinblendbar.
 
 ## Dokumente in diesem Ordner
+- `roadmap/`
+  Statusbasierte Roadmap mit `done / partial / planned`, konkreten nächsten Schritten und Abgleich zwischen Dokumentation und aktuellem Codebestand.
 - `chat-turns-actions/`
   Präzise Planung für Assistant-Turns, Inline-Aktionsblöcke im Chat, automatisches Einklappen bei der nächsten Nachricht und manuelles Wiederaufklappen.
 - `dark-mode/`
@@ -80,6 +84,8 @@ Dieses Verzeichnis hält die fachlichen und technischen Entscheidungen für `age
   Sichtbare Status- und Aktivitätsereignisse im UI.
 - `layout-canvas/`
   Grundaufbau der Arbeitsfläche.
+- `map-rendering/`
+  Kartenprojektion, Layer-Schalter, Zoom/Pan und Präsentationsverhalten der Lagekarten.
 - `emergency-water-planning/`
   Fachliches Einsatzszenario für Wasser- und Kräfteplanung.
 - `ui-style-reference/`
