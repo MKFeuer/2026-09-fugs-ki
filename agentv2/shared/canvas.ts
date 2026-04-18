@@ -66,7 +66,7 @@ export interface CanvasMapMarker {
   id: string;
   label: string;
   point: CanvasGeoPoint;
-  kind: "fire" | "hydrant" | "water" | "vehicle" | "point";
+  kind: "fire" | "hydrant" | "water" | "vehicle" | "point" | "firetruck" | "ladder" | "command" | "ambulance" | "staging";
   flowRateLpm?: number;
   flowRateEstimated?: boolean;
   note?: string;

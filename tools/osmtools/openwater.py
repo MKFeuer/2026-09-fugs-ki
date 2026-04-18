@@ -3,11 +3,9 @@ import httpx
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
+from osmtools.osm import overpass_elements_by_bbox_async, radius_to_bbox
+
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
-OVERPASS_ENDPOINTS = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-]
 _HEADERS = {"User-Agent": "FugsKI-OpenWaterTool/1.0"}
 
 _MAX_SUCTION_HEIGHT_M = 7.5   # FPN pump standard max suction lift
@@ -33,6 +31,14 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * R * math.asin(math.sqrt(a))
 
 
+def _tile_parts_for_radius(radius_m: int) -> int:
+    if radius_m <= 1500:
+        return 1
+    if radius_m <= 3000:
+        return 2
+    return 4
+
+
 async def _geocode(location: str) -> dict:
     async with httpx.AsyncClient(headers=_HEADERS) as client:
         r = await client.get(
@@ -47,37 +53,27 @@ async def _geocode(location: str) -> dict:
             "address": data[0].get("display_name", location)}
 
 
-async def _query_overpass(query: str) -> list[dict]:
-    full = f"[out:json][timeout:30];\n{query}"
-    last_err = None
-    for endpoint in OVERPASS_ENDPOINTS:
-        try:
-            async with httpx.AsyncClient(timeout=40) as client:
-                r = await client.post(endpoint, data={"data": full})
-                r.raise_for_status()
-                return r.json().get("elements", [])
-        except Exception as e:
-            last_err = e
-    raise ConnectionError(f"Overpass server unreachable: {last_err}")
-
-
 async def _find_open_water(lat: float, lon: float, radius: int) -> list[dict]:
-    query = f"""
+    query = """
 (
-  node["natural"="water"](around:{radius},{lat},{lon});
-  way["natural"="water"](around:{radius},{lat},{lon});
-  node["waterway"~"river|canal|stream"](around:{radius},{lat},{lon});
-  way["waterway"~"river|canal|stream"](around:{radius},{lat},{lon});
-  node["leisure"="swimming_pool"](around:{radius},{lat},{lon});
-  way["leisure"="swimming_pool"](around:{radius},{lat},{lon});
-  node["man_made"="reservoir"](around:{radius},{lat},{lon});
-  way["man_made"="reservoir"](around:{radius},{lat},{lon});
-  node["man_made"="basin"](around:{radius},{lat},{lon});
-  way["man_made"="basin"](around:{radius},{lat},{lon});
+  node["natural"="water"]({bbox});
+  way["natural"="water"]({bbox});
+  node["waterway"~"river|canal|stream"]({bbox});
+  way["waterway"~"river|canal|stream"]({bbox});
+  node["leisure"="swimming_pool"]({bbox});
+  way["leisure"="swimming_pool"]({bbox});
+  node["man_made"~"reservoir|basin"]({bbox});
+  way["man_made"~"reservoir|basin"]({bbox});
 );
-out center;
+out center qt;
 """
-    elements = await _query_overpass(query)
+    elements = await overpass_elements_by_bbox_async(
+        query,
+        bbox=radius_to_bbox(lat, lon, radius),
+        timeout=30,
+        tile_parts=_tile_parts_for_radius(radius),
+        cache_ttl_s=24 * 3600,
+    )
 
     sources = []
     for el in elements:
@@ -97,6 +93,8 @@ out center;
                       tags.get("leisure") or tags.get("man_made") or "water")
         name = tags.get("name") or ""
         distance = _haversine(lat, lon, wlat, wlon)
+        if distance > radius:
+            continue
 
         # Estimate suction hose count (2m sections, assume ~1m bank height)
         suction_sections = math.ceil(1.5 / 2) + 1  # minimum practical

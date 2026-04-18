@@ -52,7 +52,25 @@ interface ClientCanvasItemRemoveEvent {
   itemId: string;
 }
 
-type ClientEvent = ClientInitEvent | ClientNewChatEvent | ClientSwitchChatEvent | ClientChatEvent | ClientCanvasItemRemoveEvent;
+interface ClientRenameChatEvent {
+  type: "rename_chat";
+  chatId: string;
+  title: string;
+}
+
+interface ClientDeleteChatEvent {
+  type: "delete_chat";
+  chatId: string;
+}
+
+type ClientEvent =
+  | ClientInitEvent
+  | ClientNewChatEvent
+  | ClientSwitchChatEvent
+  | ClientChatEvent
+  | ClientCanvasItemRemoveEvent
+  | ClientRenameChatEvent
+  | ClientDeleteChatEvent;
 
 type ServerEvent =
   | { type: "ready"; snapshot: SessionSnapshot }
@@ -270,7 +288,7 @@ async function executeToolCall(
         const action = createTurnAction("Karte", "Keine Karte gefunden", "warn");
         return { summary: "Keine Karte vorhanden. Bitte erst canvas_create_map aufrufen.", action };
       }
-      const markerKinds = ["fire", "hydrant", "water", "vehicle", "point"] as const;
+      const markerKinds = ["fire", "hydrant", "water", "vehicle", "point", "firetruck", "ladder", "command", "ambulance", "staging"] as const;
       const kind = markerKinds.includes(String(args.kind) as (typeof markerKinds)[number])
         ? (args.kind as (typeof markerKinds)[number])
         : "point";
@@ -614,7 +632,7 @@ function canvasTools(): OpenAIToolDefinition[] {
                   label: { type: "string" },
                   kind: {
                     type: "string",
-                    enum: ["fire", "hydrant", "water", "vehicle", "point"],
+                    enum: ["fire", "hydrant", "water", "vehicle", "point", "firetruck", "ladder", "command", "ambulance", "staging"],
                   },
                   lat: { type: "number" },
                   lng: { type: "number" },
@@ -714,7 +732,11 @@ function canvasTools(): OpenAIToolDefinition[] {
           properties: {
             mapId: { type: "string", description: "ID der Zielkarte – weglassen für neueste Karte im Chat" },
             label: { type: "string", description: "Kurzbezeichnung des Markers, z.B. 'Hydrant 3' oder 'Brandstelle'" },
-            kind: { type: "string", enum: ["fire", "hydrant", "water", "vehicle", "point"], description: "fire=Brandstelle, hydrant=Hydrant, water=Wasserentnahme, vehicle=Fahrzeug, point=sonstiger Punkt" },
+            kind: {
+              type: "string",
+              enum: ["fire", "hydrant", "water", "vehicle", "point", "firetruck", "ladder", "command", "ambulance", "staging"],
+              description: "fire=Brandstelle, hydrant=Hydrant, water=Wasserentnahme, vehicle=Fahrzeug, point=sonstiger Punkt | Fahrzeuge mit Emoji: firetruck=🚒 Löschfahrzeug (HLF/LF/TLF), ladder=🚒 Drehleiter (DLK), command=⭐ Einsatzleitung (ELW/EL), ambulance=🚑 Rettungsdienst (RTW/NEF), staging=🅿️ Bereitstellungsraum",
+            },
             lat: { type: "number", description: "Breitengrad WGS84, z.B. 48.13743" },
             lng: { type: "number", description: "Längengrad WGS84, z.B. 11.57549" },
             flowRateLpm: { type: "number", description: "Nur für Hydranten: Durchfluss in Litern pro Minute, idealerweise aus analyze_hydrants()" },
@@ -909,7 +931,7 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
   const conversation: OpenAIConversationMessage[] = [
     {
       role: "system",
-      content: `${SYSTEM_PROMPT}\n\nCanvas-Tools:\n- canvas_create_map: Karte anlegen mit Zentrum, Zoom, initialen Markern/Bereichen/Routen\n- canvas_map_add_marker: Einzelnen Marker zur bestehenden Karte hinzufügen (label, kind, lat, lng) – bevorzuge dieses Tool für schrittweisen Aufbau\n- canvas_map_add_area: Kreisbereich einzeichnen (Sperrzone, Gefahrenbereich, Wasserentnahme)\n- canvas_map_add_route: Pendelroute oder Zufahrt einzeichnen (mind. 2 Punkte)\n- canvas_map_add_polygon: Unregelmäßige Fläche (Evakuierungszone, Gebäude, Abschnitt, Perimeter)\n- canvas_map_add_label: Freier Textpunkt (Sammelpunkt, Triage, Bereitstellungsraum)\n- canvas_map_add_wind: Windpfeil mit Richtung und Geschwindigkeit\n- canvas_create_diagram: Strukturdiagramme (flow, radial, timeline, matrix)\n- canvas_create_chart: Zahlenreihen als Balken-, Linien-, Flächen- oder XY-Chart\n- canvas_add_image: Bildplatzhalter\n- canvas_add_note: Textnotiz\n- canvas_clear: Canvas leeren\n\nKarten-Workflow für Lagebilder:\n1. canvas_create_map mit Einsatzort als Zentrum (centerLat/centerLng)\n2. Dann canvas_map_add_marker für jeden Punkt (Brandstelle, Hydranten, Fahrzeuge) – jeder Marker MUSS andere lat/lng haben\n3. Für Hydranten möglichst zuerst analyze_hydrants nutzen und den ermittelten Durchfluss in flowRateLpm übernehmen\n4. canvas_map_add_area für Sperrzonen\n5. canvas_map_add_route für Pendelrouten\n\nKOORDINATEN-REGELN:\n- Jeder Marker braucht eindeutige lat/lng – niemals zwei Marker mit identischen Koordinaten\n- Das Tool gibt nach jedem Aufruf mapContext.center zurück – nutze diese Kartenmitte als Basis\n- Wenn keine exakte Adresse bekannt: Offset vom Zentrum schätzen (±0.0001–0.002 Grad ≈ 10–200m)\n- Beispiel: Zentrum 48.1374, 11.5755 → Hydrant Nord: 48.1384, 11.5755 | Hydrant Ost: 48.1374, 11.5775\n- Nutze Geocoding-Tools für echte Adressen wenn vorhanden\n- Wenn analyze_hydrants einen Hydranten liefert, übernimm Flow rate in flowRateLpm und setze flowRateEstimated=true, falls der MCP-Output den Wert als geschätzt markiert${mcpSection}`,
+      content: `${SYSTEM_PROMPT}\n\nCanvas-Tools:\n- canvas_create_map: Karte anlegen mit Zentrum, Zoom, initialen Markern/Bereichen/Routen\n- canvas_map_add_marker: Einzelnen Marker zur bestehenden Karte hinzufügen (label, kind, lat, lng) – bevorzuge dieses Tool für schrittweisen Aufbau\n  Fahrzeug-Kinds mit Emoji: firetruck=🚒 Löschfahrzeug, ladder=🚒 Drehleiter, command=⭐ Einsatzleitung, ambulance=🚑 Rettungsdienst, staging=🅿️ Bereitstellungsraum\n- canvas_map_add_area: Kreisbereich einzeichnen (Sperrzone, Gefahrenbereich, Wasserentnahme)\n- canvas_map_add_route: Pendelroute oder Zufahrt einzeichnen (mind. 2 Punkte)\n- canvas_map_add_polygon: Unregelmäßige Fläche (Evakuierungszone, Gebäude, Abschnitt, Perimeter)\n- canvas_map_add_label: Freier Textpunkt (Sammelpunkt, Triage, Bereitstellungsraum)\n- canvas_map_add_wind: Windpfeil mit Richtung und Geschwindigkeit\n- canvas_create_diagram: Strukturdiagramme (flow, radial, timeline, matrix)\n- canvas_create_chart: Zahlenreihen als Balken-, Linien-, Flächen- oder XY-Chart\n- canvas_add_image: Bildplatzhalter\n- canvas_add_note: Textnotiz\n- canvas_clear: Canvas leeren\n\nKarten-Workflow für Lagebilder:\n1. canvas_create_map mit Einsatzort als Zentrum (centerLat/centerLng)\n2. Dann canvas_map_add_marker für jeden Punkt (Brandstelle, Hydranten, Fahrzeuge) – jeder Marker MUSS andere lat/lng haben\n3. Für Hydranten möglichst zuerst analyze_hydrants nutzen und den ermittelten Durchfluss in flowRateLpm übernehmen\n4. canvas_map_add_area für Sperrzonen\n5. canvas_map_add_route für Pendelrouten\n\nKOORDINATEN-REGELN:\n- Jeder Marker braucht eindeutige lat/lng – niemals zwei Marker mit identischen Koordinaten\n- Das Tool gibt nach jedem Aufruf mapContext.center zurück – nutze diese Kartenmitte als Basis\n- Wenn keine exakte Adresse bekannt: Offset vom Zentrum schätzen (±0.0001–0.002 Grad ≈ 10–200m)\n- Beispiel: Zentrum 48.1374, 11.5755 → Hydrant Nord: 48.1384, 11.5755 | Hydrant Ost: 48.1374, 11.5775\n- Nutze Geocoding-Tools für echte Adressen wenn vorhanden\n- Wenn analyze_hydrants einen Hydranten liefert, übernimm Flow rate in flowRateLpm und setze flowRateEstimated=true, falls der MCP-Output den Wert als geschätzt markiert${mcpSection}`,
     },
     ...chat.messages.map((message) => ({
       role: message.role,
@@ -1149,6 +1171,29 @@ export function createWebSocketHandlers(runtimeConfig: RuntimeConfig) {
         chat.canvasItems = chat.canvasItems.filter((item) => item.id !== event.itemId);
         touchChat(chat);
         ws.data.session.updatedAt = chat.updatedAt;
+        emitSnapshot(ws);
+        return;
+      }
+
+      if (event.type === "rename_chat") {
+        const chat = ws.data.session.chats.find((c) => c.id === event.chatId);
+        if (chat && event.title.trim()) {
+          chat.title = event.title.trim().slice(0, 60);
+          touchChat(chat);
+          ws.data.session.updatedAt = chat.updatedAt;
+          persistSessionAsync(ws.data.session);
+        }
+        return;
+      }
+
+      if (event.type === "delete_chat") {
+        const session = ws.data.session;
+        if (session.chats.length <= 1) return;
+        session.chats = session.chats.filter((c) => c.id !== event.chatId);
+        if (session.activeChatId === event.chatId) {
+          session.activeChatId = session.chats[0].id;
+        }
+        session.updatedAt = new Date().toISOString();
         emitSnapshot(ws);
         return;
       }

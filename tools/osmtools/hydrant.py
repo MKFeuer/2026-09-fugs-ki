@@ -3,11 +3,9 @@ import httpx
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
+from osmtools.osm import overpass_elements_by_bbox_async, radius_to_bbox
+
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
-OVERPASS_ENDPOINTS = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-]
 _HEADERS = {"User-Agent": "FugsKI-HydrantTool/1.0"}
 
 _FLOW_FALLBACK: dict[str, int] = {
@@ -70,6 +68,14 @@ def _hose_count(lay_m: float) -> int:
     return math.ceil(lay_m / 20)
 
 
+def _tile_parts_for_radius(radius_m: int) -> int:
+    if radius_m <= 1500:
+        return 1
+    if radius_m <= 3000:
+        return 2
+    return 4
+
+
 async def _geocode(location: str) -> dict:
     async with httpx.AsyncClient(headers=_HEADERS) as client:
         r = await client.get(
@@ -99,27 +105,17 @@ async def _reverse_geocode(lat: float, lon: float) -> str:
 
 
 async def _find_hydrants(lat: float, lon: float, radius: int) -> list[dict]:
-    query = f"""
-(
-  node["emergency"="fire_hydrant"](around:{radius},{lat},{lon});
-  node["emergency"="water_tank"](around:{radius},{lat},{lon});
-  node["emergency"="suction_point"](around:{radius},{lat},{lon});
-);
-out body;
+    query = """
+node["emergency"~"fire_hydrant|water_tank|suction_point"]({bbox});
+out body qt;
 """
-    full = f"[out:json][timeout:30];\n{query}"
-    last_err = None
-    for endpoint in OVERPASS_ENDPOINTS:
-        try:
-            async with httpx.AsyncClient(timeout=40) as client:
-                r = await client.post(endpoint, data={"data": full})
-                r.raise_for_status()
-                elements = r.json().get("elements", [])
-                break
-        except Exception as e:
-            last_err = e
-    else:
-        raise ConnectionError(f"Overpass server unreachable: {last_err}")
+    elements = await overpass_elements_by_bbox_async(
+        query,
+        bbox=radius_to_bbox(lat, lon, radius),
+        timeout=30,
+        tile_parts=_tile_parts_for_radius(radius),
+        cache_ttl_s=24 * 3600,
+    )
 
     hydrants = []
     for el in elements:
@@ -130,6 +126,8 @@ out body;
         flow_raw = tags.get("flow_rate") or tags.get("fire_hydrant:flow_rate")
         flow, estimated = _parse_flow_rate(flow_raw, h_type)
         distance = _haversine(lat, lon, hlat, hlon)
+        if distance > radius:
+            continue
         lay = distance * 1.5
         score = flow / (distance + 1)
         street = tags.get("addr:street") or tags.get("name") or ""

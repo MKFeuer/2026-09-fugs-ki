@@ -275,17 +275,38 @@ const chartLayout = computed(() => {
 
 // ── Map marker icons ──────────────────────────────────────────────────────────
 
-const KIND_CONFIG: Record<string, { color: string; label: string }> = {
-  fire:    { color: "#c53030", label: "F" },
-  hydrant: { color: "#2b6cb0", label: "H" },
-  water:   { color: "#0694a2", label: "W" },
-  vehicle: { color: "#c05621", label: "E" },
-  point:   { color: "#553c9a", label: "P" },
+const KIND_CONFIG: Record<string, { color: string; label: string; emoji?: string }> = {
+  // Classic pin markers
+  fire:      { color: "#c53030", label: "F" },
+  hydrant:   { color: "#2b6cb0", label: "H" },
+  water:     { color: "#0694a2", label: "W" },
+  vehicle:   { color: "#c05621", label: "E" },
+  point:     { color: "#553c9a", label: "P" },
+  // Emoji vehicle markers
+  firetruck: { color: "#dc2626", label: "🚒", emoji: "🚒" },
+  ladder:    { color: "#b91c1c", label: "🚒", emoji: "🚒" },
+  command:   { color: "#7c3aed", label: "⭐", emoji: "⭐" },
+  ambulance: { color: "#16a34a", label: "🚑", emoji: "🚑" },
+  staging:   { color: "#0891b2", label: "🅿", emoji: "🅿️" },
 };
 
 function markerIcon(marker: { kind: string; label: string }) {
   const cfg = KIND_CONFIG[marker.kind] ?? KIND_CONFIG.point;
-  const shortName = marker.label.length > 14 ? marker.label.slice(0, 13) + "…" : marker.label;
+  const shortName = marker.label.length > 16 ? marker.label.slice(0, 15) + "…" : marker.label;
+
+  if (cfg.emoji) {
+    return L.divIcon({
+      html: `<div class="map-emoji-group">
+        <div class="map-emoji-icon">${cfg.emoji}</div>
+        <div class="map-emoji-name">${shortName}</div>
+      </div>`,
+      className: "",
+      iconSize: [80, 48],
+      iconAnchor: [40, 30],
+      popupAnchor: [0, -36],
+    }) as unknown as L.Icon;
+  }
+
   return L.divIcon({
     html: `<div class="map-pin-group">
       <div class="map-pin" style="--pin-color:${cfg.color}"><span>${cfg.label}</span></div>

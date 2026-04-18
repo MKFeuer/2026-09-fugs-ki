@@ -83,7 +83,9 @@ type ClientEvent =
   | { type: "new_chat" }
   | { type: "switch_chat"; chatId: string }
   | { type: "chat"; chatId: string; messageId: string; text: string }
-  | { type: "canvas_item_remove"; chatId: string; itemId: string };
+  | { type: "canvas_item_remove"; chatId: string; itemId: string }
+  | { type: "rename_chat"; chatId: string; title: string }
+  | { type: "delete_chat"; chatId: string };
 
 const storageKeys = {
   sessionId: "agentv2.sessionId",
@@ -119,10 +121,45 @@ const draft = ref("");
 const socket = ref<WebSocket | null>(null);
 const errorMessage = ref("");
 const scrollTarget = ref<HTMLDivElement | null>(null);
+
+// ── Delta batching ──────────────────────────────────────────────────────────
+// Accumulate token deltas between animation frames instead of updating Vue
+// reactivity + scrolling on every single token (30-50/s kills main thread).
+const _deltaBuffer = new Map<string, string>(); // "chatId::messageId" → text
+let _deltaRaf: number | null = null;
+
+function _flushDeltas() {
+  _deltaRaf = null;
+  if (_deltaBuffer.size === 0) return;
+  for (const [key, text] of _deltaBuffer) {
+    const sep = key.indexOf("::");
+    const chatId = key.slice(0, sep);
+    const messageId = key.slice(sep + 2);
+    updateAssistantMessage(chatId, messageId, (msg) => { msg.content += text; });
+    // Also update turn so ChatTurnGroup shows live text (once per frame, not per token)
+    updateTurnForMessage(chatId, messageId, (turn) => {
+      turn.assistantContent = (turn.assistantContent ?? "") + text;
+    });
+  }
+  _deltaBuffer.clear();
+  const el = scrollTarget.value;
+  if (el && el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function _enqueueDelta(chatId: string, messageId: string, delta: string) {
+  const key = `${chatId}::${messageId}`;
+  _deltaBuffer.set(key, (_deltaBuffer.get(key) ?? "") + delta);
+  if (_deltaRaf === null) _deltaRaf = requestAnimationFrame(_flushDeltas);
+}
 const canvasRailRef = ref<HTMLDivElement | null>(null);
 const selectedCanvasByChat = ref<Record<string, string>>({});
 const autoConnectAttempted = ref(false);
 const canvasFullscreen = ref(false);
+const chatPopupOpen = ref(false);
+const renamingChatId = ref<string | null>(null);
+const renameValue = ref("");
 const { isExpanded: isTurnExpanded, expandTurn, collapseTurn, collapseChatTurns } = useTurnExpansion();
 const availableModels = computed(() => runtimeConfig.value?.models ?? []);
 const selectedModel = computed(() => availableModels.value.find((entry) => entry.id === model.value) ?? null);
@@ -534,23 +571,22 @@ function connect() {
       });
       connectionStatus.value = "streaming";
       statusDetail.value = "Antwort wird gestreamt";
-      scrollToBottom();
+      nextTick(() => {
+        const el = scrollTarget.value;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
       return;
     }
 
     if (event.type === "assistant_delta") {
-      updateAssistantMessage(event.chatId, event.messageId, (msg) => {
-        msg.content += event.delta;
-      });
-      updateTurnForMessage(event.chatId, event.messageId, (turn) => {
-        const assistantMessage = session.value?.chats.find((entry) => entry.id === event.chatId)?.messages.find((message) => message.id === event.messageId);
-        turn.assistantContent = assistantMessage?.content ?? turn.assistantContent ?? event.delta;
-      });
-      scrollToBottom();
+      _enqueueDelta(event.chatId, event.messageId, event.delta);
       return;
     }
 
     if (event.type === "assistant_done") {
+      // Cancel any pending rAF flush — done event carries the final content
+      if (_deltaRaf !== null) { cancelAnimationFrame(_deltaRaf); _deltaRaf = null; }
+      _deltaBuffer.clear();
       updateAssistantMessage(event.chatId, event.messageId, (msg) => {
         msg.content = event.content;
         msg.state = "done";
@@ -637,6 +673,51 @@ function switchChat(chatId: string) {
   if (socket.value?.readyState === WebSocket.OPEN) {
     emit({ type: "switch_chat", chatId });
   }
+}
+
+function openChatPopup() { chatPopupOpen.value = true; }
+function closeChatPopup() { chatPopupOpen.value = false; renamingChatId.value = null; renameValue.value = ""; }
+
+function selectChatFromPopup(chatId: string) {
+  switchChat(chatId);
+  closeChatPopup();
+}
+
+function newChatFromPopup() {
+  newChat();
+  closeChatPopup();
+}
+
+function startRename(chatId: string, currentTitle: string) {
+  renamingChatId.value = chatId;
+  renameValue.value = currentTitle;
+}
+
+function cancelRename() {
+  renamingChatId.value = null;
+  renameValue.value = "";
+}
+
+function confirmRename(chatId: string) {
+  const title = renameValue.value.trim();
+  if (title && session.value) {
+    const chat = session.value.chats.find((c) => c.id === chatId);
+    if (chat) {
+      chat.title = title.slice(0, 60);
+      emit({ type: "rename_chat", chatId, title: chat.title });
+    }
+  }
+  cancelRename();
+}
+
+function deleteChat(chatId: string) {
+  if (!session.value || session.value.chats.length <= 1) return;
+  if (chatId === activeChatId.value) {
+    const other = session.value.chats.find((c) => c.id !== chatId);
+    if (other) switchChat(other.id);
+  }
+  session.value.chats = session.value.chats.filter((c) => c.id !== chatId);
+  emit({ type: "delete_chat", chatId });
 }
 
 function sendMessage() {
@@ -820,17 +901,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="chat-strip">
-          <button
-            v-for="chat in session?.chats ?? []"
-            :key="chat.id"
-            type="button"
-            class="chat-pill"
-            :class="{ active: chat.id === activeChatId }"
-            @click="switchChat(chat.id)"
-          >
-            {{ chat.title }}
+          <span class="chat-active-title">{{ currentChat?.title ?? "Kein Chat" }}</span>
+          <button type="button" class="button chat-manage-btn" @click="openChatPopup">
+            Chats <span class="chat-count-badge">{{ session?.chats.length ?? 0 }}</span>
           </button>
-          <button type="button" class="chat-pill chat-pill-add" @click="newChat">+ Neuer Chat</button>
+          <button type="button" class="button chat-new-btn" @click="newChat" title="Neuer Chat">+</button>
         </div>
 
         <div ref="scrollTarget" class="chat-stream">
@@ -921,4 +996,61 @@ onBeforeUnmount(() => {
       </section>
     </main>
   </div>
+
+  <!-- ── Chat-Verwaltungs-Popup ──────────────────────────────────────── -->
+  <teleport to="body">
+    <div v-if="chatPopupOpen" class="chat-popup-backdrop" @click.self="closeChatPopup">
+      <div class="chat-popup" role="dialog" aria-label="Chat-Verwaltung">
+        <div class="chat-popup-header">
+          <strong>Chats</strong>
+          <button class="chat-popup-close" type="button" title="Schließen" @click="closeChatPopup">×</button>
+        </div>
+
+        <ul class="chat-popup-list">
+          <li
+            v-for="chat in session?.chats ?? []"
+            :key="chat.id"
+            class="chat-popup-item"
+            :class="{ active: chat.id === activeChatId }"
+          >
+            <template v-if="renamingChatId === chat.id">
+              <input
+                v-model="renameValue"
+                class="chat-popup-rename-input"
+                maxlength="60"
+                @keydown.enter="confirmRename(chat.id)"
+                @keydown.escape="cancelRename"
+                @blur="confirmRename(chat.id)"
+                v-focus
+              />
+            </template>
+            <template v-else>
+              <button class="chat-popup-select" type="button" @click="selectChatFromPopup(chat.id)">
+                <span class="chat-popup-item-dot" :class="{ 'chat-popup-item-dot--active': chat.id === activeChatId }"></span>
+                <span class="chat-popup-item-title">{{ chat.title }}</span>
+                <span class="chat-popup-item-meta">{{ chat.messages.length }} Nachrichten</span>
+              </button>
+              <button
+                class="chat-popup-action"
+                type="button"
+                title="Umbenennen"
+                @click.stop="startRename(chat.id, chat.title)"
+              >✎</button>
+              <button
+                class="chat-popup-action chat-popup-action--delete"
+                type="button"
+                title="Löschen"
+                :disabled="(session?.chats.length ?? 0) <= 1"
+                @click.stop="deleteChat(chat.id)"
+              >✕</button>
+            </template>
+          </li>
+        </ul>
+
+        <div class="chat-popup-footer">
+          <button class="button button-primary" type="button" @click="newChatFromPopup">+ Neuer Chat</button>
+        </div>
+      </div>
+    </div>
+  </teleport>
 </template>

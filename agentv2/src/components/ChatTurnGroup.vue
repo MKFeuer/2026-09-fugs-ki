@@ -31,13 +31,15 @@ const emit = defineEmits<{
 
     <article v-if="turn.assistantContent" class="message assistant chat-turn-assistant">
       <div class="message-bubble">
-        <div v-if="turn.status === 'live'" class="stream-label">Streaming...</div>
-        <MarkdownMessage :content="turn.assistantContent" />
+        <div v-if="turn.status === 'live'" class="stream-label">Streaming…</div>
+        <!-- During streaming render plain text (fast); switch to Markdown only when settled -->
+        <pre v-if="turn.status === 'live'" class="stream-plain">{{ turn.assistantContent }}</pre>
+        <MarkdownMessage v-else :content="turn.assistantContent" />
       </div>
     </article>
     <article v-else-if="turn.status === 'live'" class="message assistant chat-turn-assistant">
       <div class="message-bubble">
-        <div class="stream-label">Streaming...</div>
+        <div class="stream-label">Streaming…</div>
         <p class="assistant-placeholder">Antwort wird vorbereitet …</p>
       </div>
     </article>
