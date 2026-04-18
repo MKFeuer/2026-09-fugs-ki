@@ -17,3 +17,4 @@
 - Ahmed Qureshi - [ahbitaqu](https://github.com/ahbitaqu)
 - Christopher Weber - [christopher-weber](https://github.com/christopher-weber)
 - Simon Deichsel - [obzocker](https://github.com/obzocker)
+- Matthias Wolf - [matthias-muc](https://github.com/matthias-muc)
