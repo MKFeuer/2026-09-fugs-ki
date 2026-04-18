@@ -1,0 +1,56 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: required to override Leaflet's inline styles on div-icons */
+
+/* Strip Leaflet default div-icon styling */
+.leaflet-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Wrapper: pin above, name label below */
+.map-pin-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Teardrop pin shape */
+.map-pin {
+  width: 30px;
+  height: 30px;
+  background: var(--pin-color, #553c9a);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Letter badge inside pin, counter-rotated upright */
+.map-pin span {
+  display: block;
+  transform: rotate(45deg);
+  font-weight: 800;
+  font-size: 11px;
+  color: white;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+
+/* Dark frosted-glass name label under pin */
+.map-pin-name {
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.5;
+  backdrop-filter: blur(2px);
+}

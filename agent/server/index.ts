@@ -3,6 +3,8 @@ import { createMCPClient } from "@ai-sdk/mcp";
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import type { MapData } from "../shared/map-types";
+import { createMapTools } from "./map-tools";
 
 const configPath = join(import.meta.dir, "..", "config.json");
 const config = await Bun.file(configPath)
@@ -82,7 +84,9 @@ async function connectMCPServer(entry: MCPServerEntry): Promise<MCPClient | null
       return client;
     } catch (err) {
       if (attempt < MAX_RETRIES) {
-        console.warn(`  ${name} attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${RETRY_DELAY_MS / 1000}s...`);
+        console.warn(
+          `  ${name} attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${RETRY_DELAY_MS / 1000}s...`,
+        );
         await Bun.sleep(RETRY_DELAY_MS);
       } else {
         console.error(`  ${name} failed after ${MAX_RETRIES} attempts:`, err);
@@ -123,6 +127,10 @@ const distDir = join(import.meta.dir, "..", "dist");
 
 await initMCP();
 
+// --- Map State ---
+
+const mapStore = new Map<string, MapData>();
+
 // --- Server ---
 
 function modelsResponse() {
@@ -134,6 +142,7 @@ function modelsResponse() {
 
 const server = Bun.serve({
   port: PORT,
+  hostname: "0.0.0.0",
   idleTimeout: 255,
 
   async fetch(req, bunServer) {
@@ -162,22 +171,44 @@ const server = Bun.serve({
       return modelsResponse();
     }
 
+    // Map state endpoint
+    const mapMatch = url.pathname.match(/^\/api\/map\/(.+)$/);
+    if (req.method === "GET" && mapMatch) {
+      const chatId = decodeURIComponent(mapMatch[1]);
+      const mapData = mapStore.get(chatId) ?? null;
+      console.log(`[map] GET /api/map/${chatId} → ${mapData ? mapData.title : "null"} (store has ${mapStore.size} entries: [${[...mapStore.keys()].join(", ")}])`);
+      return Response.json({ map: mapData });
+    }
+
     // Chat endpoint
     if (req.method === "POST" && url.pathname === "/api/chat") {
       bunServer.timeout(req, 0);
 
       try {
-        const { messages } = (await req.json()) as { messages: UIMessage[] };
-        const modelMessages = await convertToModelMessages(messages);
-        
+        const body = (await req.json()) as { id?: string; messages: UIMessage[] };
+        const chatId = body.id ?? "default";
+        console.log(`[chat] chatId=${chatId}, body.id=${body.id}, messages=${body.messages.length}`);
+        const modelMessages = await convertToModelMessages(body.messages);
+
+        const mapTools = createMapTools(
+          () => mapStore.get(chatId) ?? null,
+          (data) => {
+            if (data) mapStore.set(chatId, data);
+            else mapStore.delete(chatId);
+          },
+        );
+
         const activeModel = models[activeModelIndex];
-        console.log(`Chat request → ${activeModel.label}`);
+        console.log(`Chat request → ${activeModel.label} (chat: ${chatId})`);
 
         const result = streamText({
           model: activeModel.instance,
           system: BASE_PROMPT,
           messages: modelMessages,
-          tools: allTools as Parameters<typeof streamText>[0]["tools"],
+          tools: {
+            ...(allTools as Parameters<typeof streamText>[0]["tools"]),
+            ...mapTools,
+          },
           stopWhen: stepCountIs(10),
           maxRetries: 1,
           onError: ({ error }) => console.error("Stream error:", error),
