@@ -13,17 +13,24 @@ function partKey(messageId: string, part: UIMessage["parts"][number], index: num
   return `${messageId}-${part.type}-${index}`;
 }
 
-function countChars(message: UIMessage): number {
-  let chars = 0;
-  for (const part of message.parts) {
-    if (part.type === "text") chars += part.text.length;
+function partChars(part: UIMessage["parts"][number]): number {
+  if (part.type === "text") return part.text.length;
+  if (isToolUIPart(part)) {
+    let chars = 0;
+    if ("input" in part && part.input) chars += JSON.stringify(part.input).length;
+    if ("output" in part && part.output) chars += JSON.stringify(part.output).length;
+    return chars;
   }
-  return chars;
+  return 0;
+}
+
+function totalChars(message: UIMessage): number {
+  return message.parts.reduce((sum, part) => sum + partChars(part), 0);
 }
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
-  const chars = countChars(message);
+  const chars = totalChars(message);
 
   return (
     <div className={cn("msg-enter flex items-end gap-1", isUser ? "justify-end" : "justify-start")}>
@@ -62,9 +69,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
             const isDone = part.state === "output-available";
             const toolName =
               part.type === "dynamic-tool" ? part.toolName : part.type.replace(/^tool-/, "");
+            const toolChars = partChars(part);
             return (
               <div
                 key={key}
+                title={`${toolChars.toLocaleString()} chars`}
                 className="my-1.5 inline-flex items-center gap-2 rounded-lg bg-[var(--color-tool-bg)] px-2.5 py-1 text-xs font-medium text-[var(--color-tool-text)]"
               >
                 <span

@@ -1,7 +1,7 @@
 {
   "models": [
     {
-      "label": "Local LLM",
+      "label": "Local Gemma",
       "baseUrl": "http://192.168.188.24:8080/v1",
       "model": "gemma-4-26B-A4B-it-Q8_0"
     },
@@ -13,14 +13,14 @@
     }
   ],
   "mcpServers": [
-        {
+    {
       "label": "tools",
-      "url": "http://tools:8000/mcp",
+      "url": "http://localhost:3002/mcp",
       "transport": "http"
     },
     {
       "label": "commandx",
-      "url": "http://commandx:8000/mcp",
+      "url": "http://localhost:3003/mcp",
       "transport": "http"
     }
   ]
