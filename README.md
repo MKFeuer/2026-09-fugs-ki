@@ -6,7 +6,7 @@ FUGS&KI verbindet eine Chat-Oberflaeche mit einem grossen Sprachmodell (LLM) und
 
 ## Features
 
-- **Chat-Interface** — Streaming-Chat mit waehlbarem LLM (lokal oder remote, OpenAI-kompatibel)
+- **Chat-Interface** — Streaming-Chat mit waehlbarem LLM (lokal oder remote, OpenAI-kompatibel) und Kartenansicht
 - **Einsatzdaten** — Zugriff auf Einsaetze, Einsatzmittel und Alarmstichworte ueber CIMgate
 - **Nachrichten** — Lesen und Senden von Einsatz-Nachrichten direkt aus dem Chat
 - **Geodaten** — Entfernungsberechnung (WGS-84) und OpenStreetMap-Abfragen (Overpass API)
