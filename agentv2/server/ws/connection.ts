@@ -1,7 +1,8 @@
 import { createActivity, createChat, createSession, snapshotSession, type ActivityItem, type SessionSnapshot, type SessionState } from "../state";
 import { getRuntimeModel, type RuntimeConfig } from "../config/models";
-import { streamOpenAIChat, type OpenAIConversationMessage, type OpenAIToolDefinition, type OpenAIToolCall } from "../openai";
+import { streamOpenAICompatibleChat, type OpenAIConversationMessage, type OpenAIToolDefinition, type OpenAIToolCall } from "../openai";
 import { createCanvasNote, type CanvasDiagramItem, type CanvasDiagramLayout, type CanvasImageItem, type CanvasItem, type CanvasMapItem, type CanvasNoteItem } from "../../shared/canvas";
+import { createTurn, summarizeTurn, type ChatTurn, type TurnActionItem } from "../../shared/turn";
 
 export interface ConnectionState {
   modelId: string;
@@ -38,6 +39,9 @@ type ClientEvent = ClientInitEvent | ClientNewChatEvent | ClientSwitchChatEvent 
 type ServerEvent =
   | { type: "ready"; snapshot: SessionSnapshot }
   | { type: "session_state"; snapshot: SessionSnapshot }
+  | { type: "turn_started"; chatId: string; turn: ChatTurn }
+  | { type: "turn_action_added"; chatId: string; turnId: string; item: TurnActionItem }
+  | { type: "turn_completed"; chatId: string; turn: ChatTurn }
   | { type: "activity"; chatId: string; item: ActivityItem }
   | { type: "canvas_item"; chatId: string; item: CanvasItem }
   | { type: "canvas_clear"; chatId: string }
@@ -50,6 +54,7 @@ interface ToolExecutionResult {
   summary: string;
   item?: CanvasItem;
   cleared?: boolean;
+  action?: TurnActionItem;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -85,6 +90,34 @@ function clampCanvasItems(chat: SessionState["chats"][number]) {
 
 function touchChat(chat: SessionState["chats"][number]) {
   chat.updatedAt = new Date().toISOString();
+}
+
+function createTurnAction(label: string, detail: string, tone: TurnActionItem["tone"] = "neutral"): TurnActionItem {
+  return {
+    id: crypto.randomUUID(),
+    label,
+    detail,
+    tone,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function getLatestTurn(chat: SessionState["chats"][number]) {
+  return chat.turns[chat.turns.length - 1] ?? null;
+}
+
+function addTurn(chat: SessionState["chats"][number], userMessageId: string, assistantMessageId: string) {
+  const turn = createTurn(chat.id, userMessageId, assistantMessageId);
+  chat.turns.push(turn);
+  return turn;
+}
+
+function appendTurnAction(chat: SessionState["chats"][number], turnId: string, action: TurnActionItem) {
+  const turn = chat.turns.find((entry) => entry.id === turnId);
+  if (!turn) throw new Error("Turn not found");
+  turn.actionItems.push(action);
+  turn.actionSummary = summarizeTurn(turn);
+  return turn;
 }
 
 function parseToolArguments(text: string) {
@@ -258,6 +291,7 @@ function addCanvasItem(chat: SessionState["chats"][number], item: CanvasItem) {
 async function executeToolCall(
   ws: Bun.ServerWebSocket<ConnectionState>,
   chat: SessionState["chats"][number],
+  turnId: string,
   toolCall: OpenAIToolCall,
 ): Promise<ToolExecutionResult> {
   const args = parseToolArguments(toolCall.arguments);
@@ -265,6 +299,7 @@ async function executeToolCall(
   switch (toolCall.name) {
     case "canvas_create_diagram": {
       const item = addCanvasItem(chat, createDiagramItem(args));
+      const action = createTurnAction("Canvas", `Diagramm ${item.title} angelegt`, "live");
       send(ws, {
         type: "canvas_item",
         chatId: chat.id,
@@ -273,10 +308,12 @@ async function executeToolCall(
       return {
         summary: `Diagramm "${item.title}" angelegt.`,
         item,
+        action,
       };
     }
     case "canvas_add_image": {
       const item = addCanvasItem(chat, createImageItem(args));
+      const action = createTurnAction("Canvas", `Bild ${item.title} angelegt`, "live");
       send(ws, {
         type: "canvas_item",
         chatId: chat.id,
@@ -285,10 +322,12 @@ async function executeToolCall(
       return {
         summary: `Bild "${item.title}" angelegt.`,
         item,
+        action,
       };
     }
     case "canvas_create_map": {
       const item = addCanvasItem(chat, createMapItem(args));
+      const action = createTurnAction("Canvas", `Karte ${item.title} angelegt`, "live");
       send(ws, {
         type: "canvas_item",
         chatId: chat.id,
@@ -297,10 +336,12 @@ async function executeToolCall(
       return {
         summary: `Lageplan "${item.title}" angelegt.`,
         item,
+        action,
       };
     }
     case "canvas_add_note": {
       const item = addCanvasItem(chat, createNoteItem(args));
+      const action = createTurnAction("Canvas", `Notiz ${item.title} angelegt`, "live");
       send(ws, {
         type: "canvas_item",
         chatId: chat.id,
@@ -309,10 +350,12 @@ async function executeToolCall(
       return {
         summary: `Notiz "${item.title}" angelegt.`,
         item,
+        action,
       };
     }
     case "canvas_clear": {
       clearCanvas(chat);
+      const action = createTurnAction("Canvas", "Canvas geleert", "warn");
       send(ws, {
         type: "canvas_clear",
         chatId: chat.id,
@@ -320,6 +363,7 @@ async function executeToolCall(
       return {
         summary: "Canvas geleert.",
         cleared: true,
+        action,
       };
     }
     default:
@@ -528,6 +572,8 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
   ws.data.controller = controller;
   ws.data.status = "streaming";
   const usedTools: string[] = [];
+  const turn = addTurn(chat, event.messageId, assistantMessageId);
+  turn.userContent = event.text;
 
   chat.messages.push({
     id: event.messageId,
@@ -540,9 +586,21 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
   session.updatedAt = chat.updatedAt;
 
   send(ws, {
+    type: "turn_started",
+    chatId: chat.id,
+    turn,
+  });
+
+  send(ws, {
     type: "activity",
     chatId: chat.id,
     item: createActivity("Denkt nach", "Lage wird analysiert und Werkzeuge werden vorbereitet.", "live"),
+  });
+  send(ws, {
+    type: "turn_action_added",
+    chatId: chat.id,
+    turnId: turn.id,
+    item: appendTurnAction(chat, turn.id, createTurnAction("Analyse", "Lage wird vorbereitet", "live")).actionItems.at(-1)!,
   });
   send(ws, {
     type: "assistant_start",
@@ -574,8 +632,22 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
           "live",
         ),
       });
+      send(ws, {
+        type: "turn_action_added",
+        chatId: chat.id,
+        turnId: turn.id,
+        item: appendTurnAction(
+          chat,
+          turn.id,
+          createTurnAction(
+            round === 0 ? "Planung" : "Weiterdenken",
+            round === 0 ? "Antwort und Schritte vorbereitet" : "Tool-Ergebnisse ausgewertet",
+            "live",
+          ),
+        ).actionItems.at(-1)!,
+      });
 
-      const result = await streamOpenAIChat({
+      const result = await streamOpenAICompatibleChat({
         apiKey: model.apiKey,
         baseUrl: model.baseUrl,
         model: model.model,
@@ -617,8 +689,22 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
           chatId: chat.id,
           item: createActivity("Tool", toolCall.name, "live"),
         });
+        send(ws, {
+          type: "turn_action_added",
+          chatId: chat.id,
+          turnId: turn.id,
+          item: appendTurnAction(chat, turn.id, createTurnAction("Tool", toolCall.name, "live")).actionItems.at(-1)!,
+        });
 
-        const execution = await executeToolCall(ws, chat, toolCall);
+        const execution = await executeToolCall(ws, chat, turn.id, toolCall);
+        if (execution.action) {
+          send(ws, {
+            type: "turn_action_added",
+            chatId: chat.id,
+            turnId: turn.id,
+            item: appendTurnAction(chat, turn.id, execution.action).actionItems.at(-1)!,
+          });
+        }
         chat.activities.unshift(createActivity("Canvas aktualisiert", execution.summary, "live"));
         send(ws, {
           type: "activity",
@@ -654,6 +740,15 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
       content: finalContent,
       createdAt: new Date().toISOString(),
     });
+    turn.assistantContent = finalContent;
+    turn.status = "settled";
+    turn.completedAt = new Date().toISOString();
+    turn.actionSummary = summarizeTurn(turn);
+    send(ws, {
+      type: "turn_completed",
+      chatId: chat.id,
+      turn,
+    });
     chat.activities.unshift(createActivity("Antwort fertig", finalContent.slice(0, 120), "live"));
     touchChat(chat);
     session.updatedAt = chat.updatedAt;
@@ -667,6 +762,14 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
     emitSnapshot(ws);
   } catch (error) {
     ws.data.status = "error";
+    turn.status = "failed";
+    turn.completedAt = new Date().toISOString();
+    turn.actionSummary = summarizeTurn(turn);
+    send(ws, {
+      type: "turn_completed",
+      chatId: chat.id,
+      turn,
+    });
     send(ws, {
       type: "error",
       message: "LLM Antwort fehlgeschlagen.",

@@ -1,4 +1,5 @@
 import type { CanvasItem } from "../shared/canvas";
+import type { ChatTurn } from "../shared/turn";
 
 export type Role = "user" | "assistant";
 
@@ -20,6 +21,7 @@ export interface ChatThread {
   id: string;
   title: string;
   messages: ChatMessage[];
+  turns: ChatTurn[];
   activities: ActivityItem[];
   canvasItems: CanvasItem[];
   createdAt: string;
@@ -55,6 +57,7 @@ export function createChat(title = "Neue Lage"): ChatThread {
     id: crypto.randomUUID(),
     title,
     messages: [],
+    turns: [],
     activities: [],
     canvasItems: [],
     createdAt: now,

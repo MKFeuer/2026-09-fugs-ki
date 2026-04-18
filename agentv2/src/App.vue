@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import CanvasArtifact from "@/components/CanvasArtifact.vue";
-import MarkdownMessage from "@/components/MarkdownMessage.vue";
+import ChatTurnGroup from "@/components/ChatTurnGroup.vue";
 import type { CanvasItem } from "../shared/canvas";
+import { summarizeTurn, type ChatTurn, type TurnActionItem } from "../shared/turn";
+import { useTurnExpansion } from "./composables/useTurnExpansion";
 
 type Role = "user" | "assistant";
 type ConnectionStatus = "idle" | "connecting" | "ready" | "streaming" | "error";
@@ -29,6 +31,7 @@ interface ChatMessage {
   id: string;
   role: Role;
   content: string;
+  createdAt: string;
   state?: "streaming" | "done" | "error";
 }
 
@@ -43,6 +46,7 @@ interface ChatThread {
   id: string;
   title: string;
   messages: ChatMessage[];
+  turns: ChatTurn[];
   activities: ActivityItem[];
   canvasItems: CanvasItem[];
 }
@@ -62,6 +66,9 @@ interface ServerSnapshot {
 type ServerEvent =
   | { type: "ready"; snapshot: ServerSnapshot }
   | { type: "session_state"; snapshot: ServerSnapshot }
+  | { type: "turn_started"; chatId: string; turn: ChatTurn }
+  | { type: "turn_action_added"; chatId: string; turnId: string; item: TurnActionItem }
+  | { type: "turn_completed"; chatId: string; turn: ChatTurn }
   | { type: "activity"; chatId: string; item: ActivityItem }
   | { type: "canvas_item"; chatId: string; item: CanvasItem }
   | { type: "canvas_clear"; chatId: string }
@@ -82,14 +89,11 @@ type ClientEvent =
 
 const storageKeys = {
   sessionId: "agentv2.sessionId",
-  model: "agentv2.model",
   theme: "agentv2.themePreference",
 };
 
-const fallbackModelId = "openai-gpt-4o-mini";
-
 const runtimeConfig = ref<RuntimeConfig | null>(null);
-const model = ref(localStorage.getItem(storageKeys.model) ?? "");
+const model = ref("");
 const themePreference = ref<ThemePreference>((localStorage.getItem(storageKeys.theme) as ThemePreference) ?? "system");
 const systemDark = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
 const resolvedTheme = computed(() =>
@@ -112,16 +116,60 @@ const scrollTarget = ref<HTMLDivElement | null>(null);
 const canvasRailRef = ref<HTMLDivElement | null>(null);
 const selectedCanvasByChat = ref<Record<string, string>>({});
 const autoConnectAttempted = ref(false);
+const { isExpanded: isTurnExpanded, expandTurn, collapseTurn, collapseChatTurns } = useTurnExpansion();
 const availableModels = computed(() => runtimeConfig.value?.models ?? []);
 const selectedModel = computed(() => availableModels.value.find((entry) => entry.id === model.value) ?? null);
-const selectedModelLabel = computed(() => selectedModel.value?.label ?? (model.value || fallbackModelId));
+const selectedModelLabel = computed(() => selectedModel.value?.label ?? (runtimeConfig.value ? "Modell wählen" : "Modelle werden geladen"));
 
 const currentChat = computed(() => {
   const current = session.value?.chats.find((chat) => chat.id === activeChatId.value);
   return current ?? session.value?.chats[0] ?? null;
 });
+const currentChatId = computed(() => currentChat.value?.id ?? "");
 
 const canvasActivities = computed(() => currentChat.value?.activities ?? []);
+function deriveTurnsFromMessages(chat: ChatThread | null): ChatTurn[] {
+  if (!chat) return [];
+
+  const turns: ChatTurn[] = [];
+  let pendingUser: ChatMessage | null = null;
+
+  for (const message of chat.messages) {
+    if (message.role === "user") {
+      pendingUser = message;
+      turns.push({
+        id: message.id,
+        chatId: chat.id,
+        userMessageId: message.id,
+        userContent: message.content,
+        status: "settled",
+        startedAt: message.createdAt,
+        actionSummary: {
+          stepCount: 0,
+          toolCount: 0,
+          canvasCount: 0,
+          errorCount: 0,
+          headline: "Abgeschlossener Turn",
+        },
+        actionItems: [],
+      });
+      continue;
+    }
+
+    if (message.role === "assistant" && pendingUser) {
+      const turn = turns[turns.length - 1];
+      if (turn) {
+        turn.assistantMessageId = message.id;
+        turn.assistantContent = message.content;
+      }
+      pendingUser = null;
+    }
+  }
+
+  return turns;
+}
+
+const currentTurns = computed(() => currentChat.value?.turns?.length ? currentChat.value.turns : deriveTurnsFromMessages(currentChat.value));
 const timelineCanvasItems = computed(() => [...(currentChat.value?.canvasItems ?? [])].reverse());
 
 const selectedCanvasId = computed<string>({
@@ -154,10 +202,6 @@ function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function persistModel() {
-  localStorage.setItem(storageKeys.model, model.value);
-}
-
 function persistSessionId(id: string) {
   localStorage.setItem(storageKeys.sessionId, id);
 }
@@ -172,6 +216,7 @@ function createLocalSession(sessionId?: string): SessionState {
         id: chatId,
         title: "Neue Lage",
         messages: [],
+        turns: [],
         activities: [
           {
             id: makeId("activity"),
@@ -233,6 +278,36 @@ function pushActivity(chatId: string, item: ActivityItem) {
   chat.activities.unshift(item);
 }
 
+function addTurn(chatId: string, turn: ChatTurn) {
+  const chat = session.value?.chats.find((entry) => entry.id === chatId);
+  if (!chat) return;
+  chat.turns.push(turn);
+}
+
+function updateTurn(chatId: string, turnId: string, updater: (turn: ChatTurn) => void) {
+  const chat = session.value?.chats.find((entry) => entry.id === chatId);
+  const turn = chat?.turns.find((entry) => entry.id === turnId);
+  if (!turn) return;
+  updater(turn);
+}
+
+function updateTurnForMessage(chatId: string, messageId: string, updater: (turn: ChatTurn) => void) {
+  const chat = session.value?.chats.find((entry) => entry.id === chatId);
+  const turn = chat?.turns.find(
+    (entry) => entry.id === messageId || entry.userMessageId === messageId || entry.assistantMessageId === messageId,
+  );
+  if (!turn) return;
+  updater(turn);
+}
+
+function toggleTurn(chatId: string, turnId: string) {
+  if (isTurnExpanded(chatId, turnId)) {
+    collapseTurn(chatId, turnId);
+    return;
+  }
+  expandTurn(chatId, turnId);
+}
+
 function addMessage(chatId: string, message: ChatMessage) {
   const chat = session.value?.chats.find((entry) => entry.id === chatId);
   if (!chat) return;
@@ -285,26 +360,46 @@ async function loadRuntimeConfig() {
 
   const config = (await response.json()) as RuntimeConfig;
   runtimeConfig.value = config;
-  model.value = config.autoConnectModelId || config.defaultModelId || model.value || fallbackModelId;
-  persistModel();
+  model.value = config.autoConnectModelId || config.defaultModelId;
 }
 
 function connect() {
+  const runtimeModel = runtimeConfig.value;
+  const selectedModelId =
+    runtimeModel?.models.some((entry) => entry.id === model.value)
+      ? model.value
+      : runtimeModel?.autoConnectModelId || runtimeModel?.defaultModelId || "";
+
+  if (!runtimeModel || runtimeModel.models.length === 0) {
+    connectionStatus.value = "error";
+    statusDetail.value = "Keine Modelle konfiguriert";
+    errorMessage.value = "Die Laufzeitkonfiguration konnte keine Modelle laden.";
+    return;
+  }
+
+  if (!selectedModelId) {
+    connectionStatus.value = "error";
+    statusDetail.value = "Kein Modell verfügbar";
+    errorMessage.value = "Es ist kein verbindbares Modell konfiguriert.";
+    return;
+  }
+
+  model.value = selectedModelId;
+
   if (socket.value && socket.value.readyState === WebSocket.OPEN) {
     socket.value.close();
   }
 
   connectionStatus.value = "connecting";
-  statusDetail.value = selectedModelLabel.value !== fallbackModelId ? `Verbinde mit ${selectedModelLabel.value}` : "Verbinde...";
+  statusDetail.value = selectedModelLabel.value ? `Verbinde mit ${selectedModelLabel.value}` : "Verbinde...";
   errorMessage.value = "";
-  persistModel();
 
   socket.value = new WebSocket(wsUrl);
 
   socket.value.addEventListener("open", () => {
     emit({
       type: "init",
-      model: model.value.trim() || fallbackModelId,
+      model: model.value.trim(),
       sessionId: session.value?.id,
     });
   });
@@ -320,6 +415,32 @@ function connect() {
 
     if (event.type === "activity") {
       pushActivity(event.chatId, event.item);
+      scrollToBottom();
+      return;
+    }
+
+    if (event.type === "turn_started") {
+      addTurn(event.chatId, event.turn);
+      expandTurn(event.chatId, event.turn.id);
+      scrollToBottom();
+      return;
+    }
+
+    if (event.type === "turn_action_added") {
+      updateTurn(event.chatId, event.turnId, (turn) => {
+        turn.actionItems.push(event.item);
+        turn.actionSummary = summarizeTurn(turn);
+      });
+      expandTurn(event.chatId, event.turnId);
+      scrollToBottom();
+      return;
+    }
+
+    if (event.type === "turn_completed") {
+      updateTurn(event.chatId, event.turn.id, (turn) => {
+        Object.assign(turn, event.turn);
+      });
+      expandTurn(event.chatId, event.turn.id);
       scrollToBottom();
       return;
     }
@@ -354,7 +475,11 @@ function connect() {
         id: event.messageId,
         role: "assistant",
         content: "",
+        createdAt: new Date().toISOString(),
         state: "streaming",
+      });
+      updateTurnForMessage(event.chatId, event.messageId, (turn) => {
+        turn.status = "live";
       });
       connectionStatus.value = "streaming";
       statusDetail.value = "Antwort wird gestreamt";
@@ -366,6 +491,10 @@ function connect() {
       updateAssistantMessage(event.chatId, event.messageId, (msg) => {
         msg.content += event.delta;
       });
+      updateTurnForMessage(event.chatId, event.messageId, (turn) => {
+        const assistantMessage = session.value?.chats.find((entry) => entry.id === event.chatId)?.messages.find((message) => message.id === event.messageId);
+        turn.assistantContent = assistantMessage?.content ?? turn.assistantContent ?? event.delta;
+      });
       scrollToBottom();
       return;
     }
@@ -374,6 +503,10 @@ function connect() {
       updateAssistantMessage(event.chatId, event.messageId, (msg) => {
         msg.content = event.content;
         msg.state = "done";
+      });
+      updateTurnForMessage(event.chatId, event.messageId, (turn) => {
+        turn.assistantContent = event.content;
+        turn.status = "settled";
       });
       connectionStatus.value = "ready";
       statusDetail.value = "Bereit";
@@ -424,6 +557,7 @@ function newChat() {
     id: chatId,
     title: "Neue Lage",
     messages: [],
+    turns: [],
     activities: [
       {
         id: makeId("activity"),
@@ -467,12 +601,14 @@ function sendMessage() {
   if (!currentChat.value || !session.value) return;
 
   const chatId = currentChat.value.id;
+  collapseChatTurns(chatId);
   const messageId = makeId("user");
 
   addMessage(chatId, {
     id: messageId,
     role: "user",
     content: text,
+    createdAt: new Date().toISOString(),
   });
 
   pushActivity(chatId, {
@@ -514,25 +650,18 @@ function activateCanvasItem(item: CanvasItem) {
     onBeforeUnmount(() => mq.removeEventListener("change", onMqChange));
 
     loadRuntimeConfig()
-      .catch((error) => {
-        runtimeConfig.value = {
-          models: [],
-          defaultModelId: fallbackModelId,
-          autoConnectModelId: fallbackModelId,
-        };
-        model.value = model.value || fallbackModelId;
-        persistModel();
-        errorMessage.value = error instanceof Error ? error.message : String(error);
-      })
-      .finally(() => {
+      .then(() => {
         if (!autoConnectAttempted.value) {
           autoConnectAttempted.value = true;
           connect();
         }
+      })
+      .catch((error) => {
+        connectionStatus.value = "error";
+        statusDetail.value = "Laufzeitkonfiguration fehlt";
+        errorMessage.value = error instanceof Error ? error.message : String(error);
       });
   });
-
-  watch(model, persistModel);
 
 watch(
   resolvedTheme,
@@ -575,7 +704,7 @@ onBeforeUnmount(() => {
           <button class="theme-btn" :class="{ active: themePreference === 'system' }" title="Auto" type="button" @click="setTheme('system')">◑</button>
           <button class="theme-btn" :class="{ active: themePreference === 'dark' }" title="Dunkel" type="button" @click="setTheme('dark')">☽</button>
         </div>
-        <select v-model="model" class="field field-model" :disabled="availableModels.length === 0">
+        <select v-model="model" class="field field-model" :disabled="availableModels.length <= 1">
           <option v-if="availableModels.length === 0" value="">
             {{ selectedModelLabel }}
           </option>
@@ -618,36 +747,19 @@ onBeforeUnmount(() => {
         </div>
 
         <div ref="scrollTarget" class="chat-stream">
-          <div v-if="currentChat?.messages.length === 0 && activityFeed.length === 0" class="empty-state">
+          <div v-if="currentTurns.length === 0 && (currentChat?.messages.length ?? 0) === 0" class="empty-state">
             <div class="empty-icon">⚑</div>
             <h3>Lage beschreiben</h3>
             <p>Zum Beispiel: Brand im Perlacher Forst, Position, erste Einschätzung, Wasserbedarf.</p>
           </div>
 
-          <article
-            v-for="message in currentChat?.messages ?? []"
-            :key="message.id"
-            class="message"
-            :class="message.role"
-          >
-            <div class="message-bubble">
-              <div v-if="message.role === 'assistant' && message.state === 'streaming'" class="stream-label">
-                Streaming...
-              </div>
-              <MarkdownMessage :content="message.content" />
-            </div>
-          </article>
-
-          <div
-            v-for="item in [...activityFeed].reverse()"
-            :key="item.id"
-            class="activity-event"
-            :data-tone="item.tone"
-          >
-            <span class="activity-dot"></span>
-            <span class="activity-label">{{ item.label }}</span>
-            <span class="activity-detail">{{ item.detail }}</span>
-          </div>
+          <ChatTurnGroup
+            v-for="turn in currentTurns"
+            :key="turn.id"
+            :turn="turn"
+            :expanded="isTurnExpanded(currentChatId, turn.id) || turn.status === 'live'"
+            @toggle="toggleTurn(currentChatId, turn.id)"
+          />
         </div>
 
         <form class="composer" @submit.prevent="sendMessage">

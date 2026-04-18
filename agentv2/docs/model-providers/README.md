@@ -150,6 +150,11 @@ Zusätzlich gilt:
 
 Das System soll nach Reload also sofort betriebsbereit sein, ohne dass der Nutzer zuerst `Verbinden` klicken oder ein Modell eintragen muss.
 
+### Aktueller Stand
+- `.env` wird serverseitig über `config/env.ts` normalisiert.
+- OpenAI und Ollama werden als OpenAI-kompatible Provider über dieselbe Streaming-Logik behandelt.
+- Das Frontend lädt nur noch die serverseitige Modellliste und verbindet sich automatisch mit dem konfigurierten Modell.
+
 ## Wie Ollama technisch funktioniert
 
 ### Lokalbetrieb

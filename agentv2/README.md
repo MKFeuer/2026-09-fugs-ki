@@ -7,8 +7,8 @@ Vue + Bun prototype for a fast live chat and planning workspace.
 ```bash
 cd agentv2
 cp .env.example .env
-bun install
-bun dev
+npm install
+npm run dev
 ```
 
-Edit `.env` and set `OPENAI_API_KEY`. Then open the app, choose a model, and start chatting.
+Edit `.env`, set the provider and model values, then open the app. The UI auto-connects to the configured model.

@@ -1,3 +1,5 @@
+import { loadRuntimeEnvConfig } from "./env";
+
 export type RuntimeModelProvider = "openai" | "ollama";
 
 export interface RuntimeModelConfig {
@@ -35,37 +37,19 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function toBoolean(value: string | undefined, fallback = false) {
-  if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
+function createOpenAIModel(env: ReturnType<typeof loadRuntimeEnvConfig>): RuntimeModelConfig | null {
+  if (!env.openaiEnabled) return null;
+  if (!env.openaiApiKey) {
+    throw new Error("OPENAI_ENABLED is set, but OPENAI_API_KEY is missing.");
+  }
 
-function toUrl(value: string | undefined, fallback: string) {
-  return value?.trim() || fallback;
-}
-
-function ensureModelId(requested: string | undefined, models: RuntimeModelConfig[], fallback: string) {
-  if (!requested?.trim()) return fallback;
-  const found = models.find((model) => model.id === requested.trim());
-  return found ? found.id : fallback;
-}
-
-function createOpenAIModel(): RuntimeModelConfig | null {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) return null;
-
-  const model = process.env.OPENAI_MODEL?.trim() || process.env.LLM_MODEL?.trim() || "gpt-4o-mini";
-  const baseUrl = toUrl(process.env.OPENAI_BASE_URL, "https://api.openai.com/v1");
   return {
-    id: `openai-${slugify(model)}`,
-    label: `OpenAI / ${model}`,
+    id: `openai-${slugify(env.openaiModel)}`,
+    label: `OpenAI / ${env.openaiModel}`,
     provider: "openai",
-    baseUrl,
-    model,
-    apiKey,
+    baseUrl: env.openaiBaseUrl,
+    model: env.openaiModel,
+    apiKey: env.openaiApiKey,
     apiKeyEnv: "OPENAI_API_KEY",
     supportsTools: true,
     supportsVision: true,
@@ -73,35 +57,44 @@ function createOpenAIModel(): RuntimeModelConfig | null {
   };
 }
 
-function createOllamaModel(): RuntimeModelConfig | null {
-  const enabled = toBoolean(process.env.OLLAMA_ENABLED, false);
-  const configured = Boolean(process.env.OLLAMA_MODEL?.trim() || process.env.OLLAMA_BASE_URL?.trim());
-  if (!enabled && !configured && process.env.LLM_PROVIDER?.trim() !== "ollama") return null;
-
-  const model = process.env.OLLAMA_MODEL?.trim() || "qwen2.5:14b";
-  const baseUrl = toUrl(process.env.OLLAMA_BASE_URL, "http://localhost:11434/v1");
+function createOllamaModel(env: ReturnType<typeof loadRuntimeEnvConfig>): RuntimeModelConfig | null {
+  if (!env.ollamaEnabled) return null;
   return {
-    id: `ollama-${slugify(model)}`,
-    label: `Ollama / ${model}`,
+    id: `ollama-${slugify(env.ollamaModel)}`,
+    label: `Ollama / ${env.ollamaModel}`,
     provider: "ollama",
-    baseUrl,
-    model,
+    baseUrl: env.ollamaBaseUrl,
+    model: env.ollamaModel,
     supportsTools: true,
     supportsVision: false,
     supportsStreaming: true,
   };
 }
 
+function resolveModelId(requested: string | null, models: RuntimeModelConfig[], label: string, fallback?: string) {
+  if (!requested) {
+    if (fallback) return fallback;
+    throw new Error(`${label} must be set in .env when multiple models are configured.`);
+  }
+
+  const found = models.find((model) => model.id === requested);
+  if (!found) {
+    throw new Error(`${label} points to an unknown model: ${requested}`);
+  }
+
+  return found.id;
+}
+
 export function loadRuntimeConfig(): RuntimeConfig {
+  const env = loadRuntimeEnvConfig();
   const models: RuntimeModelConfig[] = [];
-  const legacyProvider = process.env.LLM_PROVIDER?.trim();
 
-  const openaiModel = createOpenAIModel();
-  const ollamaModel = createOllamaModel();
+  const openaiModel = createOpenAIModel(env);
+  const ollamaModel = createOllamaModel(env);
 
-  if (legacyProvider === "ollama") {
+  if (env.legacyProvider === "ollama") {
     if (ollamaModel) models.push(ollamaModel);
-    if (openaiModel && process.env.OPENAI_ENABLED?.trim() === "true") models.push(openaiModel);
+    if (openaiModel) models.push(openaiModel);
   } else {
     if (openaiModel) models.push(openaiModel);
     if (ollamaModel) models.push(ollamaModel);
@@ -111,10 +104,9 @@ export function loadRuntimeConfig(): RuntimeConfig {
     throw new Error("No LLM models configured. Set OPENAI_API_KEY or enable Ollama in .env.");
   }
 
-  const preferredDefaultId =
-    legacyProvider === "ollama" && ollamaModel ? ollamaModel.id : openaiModel?.id ?? ollamaModel?.id ?? models[0].id;
-  const defaultModelId = ensureModelId(process.env.DEFAULT_MODEL_ID, models, preferredDefaultId);
-  const autoConnectModelId = ensureModelId(process.env.AUTO_CONNECT_MODEL_ID, models, defaultModelId);
+  const preferredSingleModelId = models.length === 1 ? models[0].id : undefined;
+  const defaultModelId = resolveModelId(env.defaultModelId, models, "DEFAULT_MODEL_ID", preferredSingleModelId);
+  const autoConnectModelId = resolveModelId(env.autoConnectModelId, models, "AUTO_CONNECT_MODEL_ID", preferredSingleModelId);
 
   return {
     models,

@@ -62,7 +62,7 @@ export interface StreamResult {
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
-export async function streamOpenAIChat({
+export async function streamOpenAICompatibleChat({
   apiKey,
   baseUrl = DEFAULT_OPENAI_BASE_URL,
   model,
@@ -91,7 +91,7 @@ export async function streamOpenAIChat({
 
   if (!response.ok || !response.body) {
     const text = await response.text();
-    throw new Error(`OpenAI request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`);
+    throw new Error(`OpenAI-compatible request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`);
   }
 
   const reader = response.body.getReader();

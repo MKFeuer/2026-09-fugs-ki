@@ -4,7 +4,7 @@
 Diese Seite ist die operative Roadmap für `agentv2`.
 
 Sie beantwortet drei Fragen:
-- Was ist im Code heute schon vorhanden?
+- Was ist im Code heute scnexthon vorhanden?
 - Was ist nur teilweise umgesetzt?
 - Was sind die nächsten konkreten Ausbauschritte?
 
@@ -135,28 +135,29 @@ Den vorhandenen Prototypen in einen stabilen, klar beschriebenen Grundzustand br
 Das LLM-Verhalten vollständig serverseitig aus `.env` steuern und OpenAI wie Ollama parallel unterstützen.
 
 ### Status
-- `partial`
+- `done`
 
 ### Bereits umgesetzt
-- OpenAI-spezifischer Streaming-Client
-- `OPENAI_API_KEY`-basierter Startpfad
+- serverseitige `.env`-Normalisierung
+- generische OpenAI-kompatible Provider-Logik für OpenAI und Ollama
+- serverseitige Modellliste mit `DEFAULT_MODEL_ID` und `AUTO_CONNECT_MODEL_ID`
+- UI-Auto-Connect auf das konfigurierte Modell
+- Modell-Selector nur mit erlaubten Modellen
 
 ### Noch offen
-- Provider-Registry
-- Ollama-Unterstützung
-- `DEFAULT_MODEL_ID` / `AUTO_CONNECT_MODEL_ID`
-- serverseitige Modellliste statt freiem Texteingabefeld
+- feinere Provider-Healthchecks
+- zusätzliche Modellfähigkeiten in der Registry
 
 ### Konkrete Teilaufgaben
-- `planned`
+- `done`
   `.env`-Validierung in `config/env.ts`
-- `planned`
+- `done`
   normalisierte Modellliste aus `.env`
-- `planned`
+- `done`
   OpenAI-kompatibler Provider-Adapter für OpenAI und Ollama
-- `planned`
+- `done`
   UI-Selector nur für erlaubte Modelle
-- `planned`
+- `done`
   Auto-Connect beim Laden
 
 ## Phase 3 – Chat-UX und Turn-Modell

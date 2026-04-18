@@ -5,6 +5,7 @@ import type {
   CanvasItem,
   CanvasMapItem,
 } from "../../shared/canvas";
+import { useMapInteraction } from "../composables/useMapInteraction";
 
 const props = defineProps<{
   item: CanvasItem;
@@ -12,8 +13,19 @@ const props = defineProps<{
 }>();
 
 const frameRef = ref<HTMLElement | null>(null);
+const mapFrameRef = ref<HTMLElement | null>(null);
 const frameSize = ref({ width: 0, height: 0 });
 let resizeObserver: ResizeObserver | undefined;
+
+// Map interaction state
+const mapInteraction = computed(() => {
+  if (props.item.kind !== "map") return null;
+  return useMapInteraction(props.item as CanvasMapItem);
+});
+
+// Mouse interaction state
+const isDragging = ref(false);
+const dragStart = ref({ x: 0, y: 0 });
 
 const TILE_SIZE = 256;
 
@@ -96,11 +108,12 @@ const diagramLayout = computed(() => {
 });
 
 const mapLayout = computed(() => {
-  if (props.item.kind !== "map") return null;
+  if (props.item.kind !== "map" || !mapInteraction.value) return null;
   const item = props.item as CanvasMapItem;
+  const vm = mapInteraction.value.viewModel.value;
   const width = frameSize.value.width || 720;
   const height = frameSize.value.height || 440;
-  const centerPixel = project(item.center.lat, item.center.lng, item.zoom);
+  const centerPixel = project(vm.center.lat, vm.center.lng, vm.zoom);
   const topLeftX = centerPixel.x - width / 2;
   const topLeftY = centerPixel.y - height / 2;
   const startTileX = Math.floor(topLeftX / TILE_SIZE) - 1;
@@ -116,24 +129,24 @@ const mapLayout = computed(() => {
       y,
       left: x * TILE_SIZE - topLeftX,
       top: y * TILE_SIZE - topLeftY,
-      url: `https://tile.openstreetmap.org/${item.zoom}/${x}/${y}.png`,
+      url: `https://tile.openstreetmap.org/${vm.zoom}/${x}/${y}.png`,
     };
   });
 
   const markers = item.markers.map((marker) => ({
     ...marker,
-    screen: worldToScreen(marker.point, item),
+    screen: worldToScreen(marker.point, { ...item, zoom: vm.zoom, center: vm.center }),
   }));
 
   const areas = item.areas.map((area) => {
-    const screen = worldToScreen(area.center, item);
-    const pixels = area.radiusMeters / metersPerPixel(area.center.lat, item.zoom);
+    const screen = worldToScreen(area.center, { ...item, zoom: vm.zoom, center: vm.center });
+    const pixels = area.radiusMeters / metersPerPixel(area.center.lat, vm.zoom);
     return { ...area, screen, pixels };
   });
 
   const routes = item.routes.map((route) => ({
     ...route,
-    points: route.points.map((point) => worldToScreen(point, item)),
+    points: route.points.map((point) => worldToScreen(point, { ...item, zoom: vm.zoom, center: vm.center })),
   }));
 
   return {
@@ -143,6 +156,8 @@ const mapLayout = computed(() => {
     markers,
     areas,
     routes,
+    zoom: vm.zoom,
+    visibleLayers: vm.visibleLayers,
   };
 });
 
@@ -168,8 +183,50 @@ onMounted(() => {
     };
   });
 
-  if (frameRef.value) {
-    resizeObserver.observe(frameRef.value);
+  // For compact maps, use frameRef; for full-screen maps, observe mapFrameRef
+  const observeTarget = frameRef.value || mapFrameRef.value;
+  if (observeTarget) {
+    resizeObserver.observe(observeTarget);
+  }
+
+  // Add map interaction handlers
+  const mapFrame = mapFrameRef.value;
+  if (mapFrame && mapInteraction.value) {
+    mapFrame.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        mapInteraction.value!.zoomIn();
+      } else {
+        mapInteraction.value!.zoomOut();
+      }
+    });
+
+    mapFrame.addEventListener("mousedown", (e) => {
+      isDragging.value = true;
+      dragStart.value = { x: e.clientX, y: e.clientY };
+    });
+
+    mapFrame.addEventListener("mousemove", (e) => {
+      if (isDragging.value) {
+        const deltaX = e.clientX - dragStart.value.x;
+        const deltaY = e.clientY - dragStart.value.y;
+        mapInteraction.value!.pan(deltaY, deltaX);
+        dragStart.value = { x: e.clientX, y: e.clientY };
+      }
+    });
+
+    mapFrame.addEventListener("mouseup", () => {
+      isDragging.value = false;
+    });
+
+    mapFrame.addEventListener("mouseleave", () => {
+      isDragging.value = false;
+    });
+
+    mapFrame.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      mapInteraction.value!.fitToContent();
+    });
   }
 });
 
@@ -214,7 +271,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="item.kind === 'map'" ref="frameRef" class="compact-slide compact-slide-map">
-      <div class="map-frame compact-map-frame">
+      <div ref="mapFrameRef" class="map-frame compact-map-frame" :class="{ 'is-dragging': isDragging }">
         <div class="map-tiles">
           <img
             v-for="tile in mapLayout?.tiles ?? []"
@@ -261,6 +318,31 @@ onBeforeUnmount(() => {
             />
           </g>
         </svg>
+
+        <div v-if="mapInteraction && item.kind === 'map'" class="map-controls">
+          <button class="map-button map-button-zoom-in" type="button" @click="mapInteraction.zoomIn()" title="Zoom in (Mausrad)">
+            <span>+</span>
+          </button>
+          <button class="map-button map-button-zoom-out" type="button" @click="mapInteraction.zoomOut()" title="Zoom out (Mausrad)">
+            <span>−</span>
+          </button>
+          <button class="map-button map-button-fit" type="button" @click="mapInteraction.fitToContent()" title="Fit to content (Doppel-Klick)">
+            <span>⛶</span>
+          </button>
+        </div>
+
+        <div v-if="mapInteraction && item.kind === 'map' && (item as CanvasMapItem).layers.length > 0" class="map-layers">
+          <button
+            v-for="layer in (item as CanvasMapItem).layers"
+            :key="layer"
+            class="map-layer-button"
+            :data-active="mapInteraction.isLayerVisible.value(layer)"
+            @click="mapInteraction.toggleLayer(layer)"
+            type="button"
+          >
+            {{ layer }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -351,7 +433,7 @@ onBeforeUnmount(() => {
       <p>{{ item.summary }}</p>
     </div>
 
-    <div ref="frameRef" class="map-frame">
+    <div ref="mapFrameRef" class="map-frame" :class="{ 'is-dragging': isDragging }">
       <div class="map-tiles">
         <img
           v-for="tile in mapLayout?.tiles ?? []"
@@ -412,11 +494,36 @@ onBeforeUnmount(() => {
 
       <div class="map-center-card">
         <strong>{{ item.centerLabel }}</strong>
-        <span>{{ item.center.lat.toFixed(4) }}, {{ item.center.lng.toFixed(4) }}</span>
+        <span>{{ mapInteraction?.viewModel.value.center.lat.toFixed(4) }}, {{ mapInteraction?.viewModel.value.center.lng.toFixed(4) }}</span>
       </div>
 
       <div class="map-legend">
         <span v-for="entry in item.legend" :key="entry" class="map-legend-tag">{{ entry }}</span>
+      </div>
+
+      <div v-if="mapInteraction && item.kind === 'map'" class="map-controls">
+        <button class="map-button map-button-zoom-in" type="button" @click="mapInteraction.zoomIn()" title="Zoom in (Mausrad)">
+          <span>+</span>
+        </button>
+        <button class="map-button map-button-zoom-out" type="button" @click="mapInteraction.zoomOut()" title="Zoom out (Mausrad)">
+          <span>−</span>
+        </button>
+        <button class="map-button map-button-fit" type="button" @click="mapInteraction.fitToContent()" title="Fit to content (Doppel-Klick)">
+          <span>⛶</span>
+        </button>
+      </div>
+
+      <div v-if="mapInteraction && item.kind === 'map' && item.layers.length > 0" class="map-layers">
+        <button
+          v-for="layer in item.layers"
+          :key="layer"
+          class="map-layer-button"
+          :data-active="mapInteraction.isLayerVisible.value(layer)"
+          @click="mapInteraction.toggleLayer(layer)"
+          type="button"
+        >
+          {{ layer }}
+        </button>
       </div>
     </div>
 
