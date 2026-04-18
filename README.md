@@ -32,7 +32,7 @@ FUGS&KI verbindet eine Chat-Oberflaeche mit einem grossen Sprachmodell (LLM) und
                          +------------------+
                          |    CommandX       |
                          | (FastMCP/Python)  |
-                         |   Port 3003      |
+                         |   Port 3003       |
                          +------------------+
                           - Einsaetze (CIMgate)
                           - Nachrichten
