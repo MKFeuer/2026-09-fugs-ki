@@ -12,6 +12,8 @@ import {
   createNoteItem,
   parseToolArguments,
 } from "../services/canvas";
+import { callMCPTool, getServerTools, type MCPToolCall } from "../services/mcp";
+import { getToolRegistry } from "../config/tools";
 
 export interface ConnectionState {
   modelId: string;
@@ -237,8 +239,59 @@ async function executeToolCall(
         action,
       };
     }
-    default:
-      throw new Error(`Unbekanntes Tool: ${toolCall.name}`);
+    default: {
+      // Try to call external MCP tools
+      try {
+        // Determine which server has this tool
+        const allTools = getToolRegistry();
+        const tool = allTools.find((t) => t.function.name === toolCall.name);
+
+        if (!tool) {
+          throw new Error(`Unbekanntes Tool: ${toolCall.name}`);
+        }
+
+        // Find the server that has this tool
+        let serverLabel = "";
+        for (const server of ["tools", "commandx"]) {
+          const serverTools = getServerTools(server);
+          if (serverTools.some((t) => t.name === toolCall.name)) {
+            serverLabel = server;
+            break;
+          }
+        }
+
+        if (!serverLabel) {
+          throw new Error(`Konnte Server für Tool ${toolCall.name} nicht finden`);
+        }
+
+        const mcpCall: MCPToolCall = {
+          toolName: toolCall.name,
+          serverLabel,
+          input: parseToolArguments(toolCall.arguments),
+        };
+
+        const result = await callMCPTool(mcpCall);
+        const action = createTurnAction(
+          "Tool",
+          `${toolCall.name}: ${result.success ? "erfolgreich" : "fehlgeschlagen"}`,
+          result.success ? "live" : "warn",
+        );
+
+        return {
+          summary: result.success
+            ? `Tool ${toolCall.name} erfolgreich ausgeführt (${result.duration}ms)`
+            : `Tool ${toolCall.name} fehlgeschlagen: ${result.error}`,
+          action,
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const action = createTurnAction("Tool", `Fehler: ${errorMsg}`, "warn");
+        return {
+          summary: `Tool-Fehler: ${errorMsg}`,
+          action,
+        };
+      }
+    }
   }
 }
 
@@ -434,6 +487,13 @@ function canvasTools(): OpenAIToolDefinition[] {
   ];
 }
 
+function getAllTools(): OpenAIToolDefinition[] {
+  const tools = [...canvasTools()];
+  const mcpTools = getToolRegistry();
+  tools.push(...mcpTools);
+  return tools;
+}
+
 async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: ClientChatEvent) {
   const { session, runtimeConfig } = ws.data;
   const model = getRuntimeModel(runtimeConfig, ws.data.modelId);
@@ -523,7 +583,7 @@ async function handleChat(ws: Bun.ServerWebSocket<ConnectionState>, event: Clien
         baseUrl: model.baseUrl,
         model: model.model,
         messages: conversation,
-        tools: canvasTools(),
+        tools: getAllTools(),
         signal: controller.signal,
         onContentDelta: (delta) => {
           assistantContent += delta;

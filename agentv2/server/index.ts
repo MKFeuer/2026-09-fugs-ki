@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { loadRuntimeConfig } from "./config/models";
+import { initializeToolRegistry } from "./config/tools";
 import { createHttpHandler } from "./http/routes";
 import { createWebSocketHandlers, type ConnectionState } from "./ws/connection";
 import { createSession } from "./state";
@@ -8,6 +9,7 @@ const PORT = 3001;
 const distDir = join(import.meta.dir, "..", "dist");
 
 const runtimeConfig = loadRuntimeConfig();
+await initializeToolRegistry();
 const handleHttp = createHttpHandler({ runtimeConfig, distDir });
 const websocket = createWebSocketHandlers(runtimeConfig);
 
